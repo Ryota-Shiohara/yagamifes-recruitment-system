@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}補正ランキング | 新規局員採用システム{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><p class="eyebrow">NORMALIZED RANKING</p><h1>局別ランキング</h1><p>評価者×評価項目単位のz得点をT得点へ変換しています。</p></div></div>
+  {% if message %}<p class="notice success">{{ message }}</p>{% endif %}
+  <form class="toolbar panel" method="get"><div class="field compact"><label for="bureau_id">局</label><select id="bureau_id" name="bureau_id">{% for item in bureaus %}<option value="{{ item.id }}" {% if item.id == bureau.id %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></div><button class="primary" type="submit">表示</button><span class="badge">採用可能人数 {{ bureau.capacity }}人</span></form>
+  <div class="panel stack">
+    <div class="formula"><strong>補正方法</strong><span>z = (素点 − 評価者・項目平均) ÷ 標準偏差</span><span>T = 50 + 10z</span></div>
+    <div class="table-wrap"><table><thead><tr><th>順位</th><th>応募者</th><th>素点平均</th><th>補正後</th><th>評価者</th><th>候補判定</th><th>採否</th></tr></thead><tbody>
+      {% for row in rows %}
+        <tr>
+          <td>{% if row.rank %}<span class="rank">{{ row.rank }}</span>{% else %}—{% endif %}</td>
+          <td><a href="{{ url_for('applicant_detail', id=row.applicant.applicant_id) }}"><strong>{{ row.applicant.applicant_name }}</strong></a></td>
+          <td>{% if row.raw_average is not none %}<span class="score">{{ row.raw_average|round(2) }}</span>{% else %}—{% endif %}</td>
+          <td>{% if row.normalized_score is not none %}<span class="score">{{ row.normalized_score|round(2) }}</span>{% else %}<span class="badge danger">{{ row.reasons|join('・') }}</span>{% endif %}</td>
+          <td>{{ row.evaluator_count }}人</td>
+          <td>{% if row.candidate_status == 'candidate' %}<span class="badge">採用候補</span>{% elif row.candidate_status == 'boundary_tie' %}<span class="badge warning">境界同点・要判断</span>{% elif row.candidate_status == 'outside' %}<span class="badge muted">候補外</span>{% else %}<span class="badge danger">順位未確定</span>{% endif %}</td>
+          <td>{{ decision_labels.get(row.applicant.decision) }}</td>
+        </tr>
+      {% else %}<tr><td class="empty" colspan="7">この局の応募者はいません。</td></tr>{% endfor %}
+    </tbody></table></div>
+    <p class="help">評価者2人未満、全項目未入力、補正用標本2件未満の場合は順位を確定しません。採否は応募者詳細から手動で確定します。</p>
+  </div>
+{% endblock %}

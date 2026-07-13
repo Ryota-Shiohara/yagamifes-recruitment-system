@@ -1,0 +1,181 @@
+import sqlite3
+import tempfile
+import unittest
+
+import app as app_module
+
+
+class RecruitmentAppTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_directory = tempfile.TemporaryDirectory()
+        self.database_path = self.temp_directory.name + '/test.db'
+        connection = sqlite3.connect(self.database_path)
+        with open('schema.sql', encoding='utf-8') as schema_file:
+            connection.executescript(schema_file.read())
+        with open('seed.sql', encoding='utf-8') as seed_file:
+            connection.executescript(seed_file.read())
+        connection.close()
+
+        app_module.DATABASE = self.database_path
+        app_module.app.config['TESTING'] = True
+        self.client = app_module.app.test_client()
+
+    def tearDown(self) -> None:
+        self.temp_directory.cleanup()
+
+    def connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.database_path)
+        connection.execute('PRAGMA foreign_keys = ON')
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def test_main_pages_render(self) -> None:
+        paths = (
+            '/',
+            '/applicants/new?bureau_id=1',
+            '/applicants',
+            '/applicants/101',
+            '/applicants/101/edit',
+            '/bureau-schedules',
+            '/bureau-schedules/1/edit',
+            '/interviewers',
+            '/interviewers/1/evaluations',
+            '/interviewers/1/applicants/101/scores',
+            '/rankings?bureau_id=1',
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path).status_code, 200)
+
+    def test_applicant_and_availabilities_are_inserted_together(self) -> None:
+        response = self.client.post('/applicants/new', data={
+            'name': '新規 応募者',
+            'email': 'new-applicant@example.invalid',
+            'bureau_id': '1',
+            'remark': 'テスト応募',
+            'availability_ids': ['1', '2'],
+        })
+        self.assertEqual(response.status_code, 302)
+        connection = self.connect()
+        applicant = connection.execute(
+            'SELECT id FROM applicants WHERE email = ?',
+            ('new-applicant@example.invalid',),
+        ).fetchone()
+        self.assertIsNotNone(applicant)
+        count = connection.execute(
+            '''SELECT COUNT(*) FROM applicant_availabilities
+               WHERE applicant_id = ?''', (applicant['id'],)
+        ).fetchone()[0]
+        self.assertEqual(count, 2)
+        connection.close()
+
+    def test_cross_bureau_availability_is_rejected(self) -> None:
+        response = self.client.post('/applicants/new', data={
+            'name': '不正 応募者',
+            'email': 'invalid-applicant@example.invalid',
+            'bureau_id': '1',
+            'remark': '',
+            'availability_ids': ['4'],
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('希望局に属さない面接枠'.encode(), response.data)
+        connection = self.connect()
+        count = connection.execute(
+            'SELECT COUNT(*) FROM applicants WHERE email = ?',
+            ('invalid-applicant@example.invalid',),
+        ).fetchone()[0]
+        self.assertEqual(count, 0)
+        connection.close()
+
+    def test_double_booking_is_rejected(self) -> None:
+        response = self.client.post(
+            '/applicants/103/schedule',
+            data={'bureau_schedule_id': '1'},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('error=', response.headers['Location'])
+        connection = self.connect()
+        confirmed = connection.execute(
+            '''SELECT confirmed_bureau_schedule_id FROM applicants
+               WHERE id = 103'''
+        ).fetchone()[0]
+        self.assertEqual(confirmed, 3)
+        connection.close()
+
+    def test_schedule_is_locked_after_scoring(self) -> None:
+        response = self.client.post(
+            '/applicants/101/schedule',
+            data={'bureau_schedule_id': ''},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('error=', response.headers['Location'])
+        connection = self.connect()
+        confirmed = connection.execute(
+            '''SELECT confirmed_bureau_schedule_id FROM applicants
+               WHERE id = 101'''
+        ).fetchone()[0]
+        self.assertEqual(confirmed, 1)
+        connection.close()
+
+    def test_database_rejects_overlapping_slot(self) -> None:
+        connection = self.connect()
+        connection.execute(
+            '''INSERT INTO schedules (id, start_at, end_at)
+               VALUES (99, '2026-07-10 12:50:00', '2026-07-10 13:10:00')'''
+        )
+        try:
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    '''INSERT INTO bureau_schedules (bureau_id, schedule_id)
+                       VALUES (1, 99)'''
+                )
+        finally:
+            connection.close()
+
+    def test_database_rejects_cross_bureau_score(self) -> None:
+        connection = self.connect()
+        with self.assertRaises(sqlite3.IntegrityError):
+            connection.execute(
+                '''INSERT INTO scores
+                   (applicant_id, interviewer_id, criterion_id, score)
+                   VALUES (101, 3, 21, 5)'''
+            )
+        connection.close()
+
+    def test_invalid_score_rolls_back_all_items(self) -> None:
+        response = self.client.post(
+            '/interviewers/1/applicants/101/scores',
+            data={'score_1': '10', 'score_2': '0'},
+        )
+        self.assertEqual(response.status_code, 200)
+        connection = self.connect()
+        scores = connection.execute(
+            '''SELECT criterion_id, score FROM scores
+               WHERE applicant_id = 101 AND interviewer_id = 1
+               ORDER BY criterion_id'''
+        ).fetchall()
+        saved_scores = [
+            (row['criterion_id'], row['score']) for row in scores
+        ]
+        self.assertEqual(saved_scores, [(1, 9), (2, 8)])
+        connection.close()
+
+    def test_normalized_ranking_is_calculated(self) -> None:
+        with app_module.app.app_context():
+            bureau, rows = app_module.calculate_rankings(
+                app_module.get_db(), 1,
+            )
+            self.assertEqual(bureau['name'], 'IT局')
+            self.assertEqual(
+                [row['applicant']['applicant_id'] for row in rows],
+                [101, 102, 103],
+            )
+            self.assertAlmostEqual(
+                rows[0]['normalized_score'], 55.0, places=2)
+            self.assertEqual(rows[0]['candidate_status'], 'candidate')
+            self.assertEqual(rows[1]['candidate_status'], 'candidate')
+            self.assertEqual(rows[2]['candidate_status'], 'incomplete')
+
+
+if __name__ == '__main__':
+    unittest.main()

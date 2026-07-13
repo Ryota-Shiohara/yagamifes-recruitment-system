@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}エラー | 新規局員採用システム{% endblock %}
+{% block content %}
+  <section class="panel narrow">
+    <p class="eyebrow">ERROR</p>
+    <h1>処理できませんでした</h1>
+    <p class="notice error">{{ message }}</p>
+    <a class="button secondary" href="{{ url_for('index') }}">入口へ戻る</a>
+  </section>
+{% endblock %}

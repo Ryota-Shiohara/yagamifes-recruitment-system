@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}面接枠管理 | 新規局員採用システム{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><p class="eyebrow">SCHEDULING</p><h1>局別面接枠</h1><p>局と共通時間帯の組で、一つの面接を表します。</p></div></div>
+  {% if message %}<p class="notice success">{{ message }}</p>{% endif %}{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+  <form class="toolbar panel" method="get">
+    <div class="field compact"><label for="bureau_filter">表示する局</label><select id="bureau_filter" name="bureau_id">{% for bureau in bureaus %}<option value="{{ bureau.id }}" {% if bureau.id == selected_bureau_id %}selected{% endif %}>{{ bureau.name }}</option>{% endfor %}</select></div>
+    <button class="secondary" type="submit">表示</button>
+  </form>
+  <div class="detail-grid">
+    <section class="panel">
+      <h2>面接枠一覧</h2>
+      <div class="table-wrap"><table><thead><tr><th>時間</th><th>希望者</th><th>確定者</th><th></th></tr></thead><tbody>
+        {% for slot in slots %}<tr><td>{{ slot.start_at }}<br><small>〜 {{ slot.end_at }}</small></td><td>{{ slot.availability_count }}人</td><td>{% if slot.booked_applicant_id %}<a href="{{ url_for('applicant_detail', id=slot.booked_applicant_id) }}">{{ slot.booked_applicant_name }}</a>{% else %}<span class="badge muted">空き</span>{% endif %}</td><td><div class="button-row"><a class="button secondary small" href="{{ url_for('bureau_schedule_edit', id=slot.id) }}">編集</a><form method="post" action="{{ url_for('bureau_schedule_delete', id=slot.id) }}"><button class="danger small" type="submit">削除</button></form></div></td></tr>
+        {% else %}<tr><td class="empty" colspan="4">この局の面接枠はありません。</td></tr>{% endfor %}
+      </tbody></table></div>
+    </section>
+    <section class="panel stack">
+      <div><p class="eyebrow">INSERT</p><h2>面接枠を追加</h2><p class="help">同じ局で時間が重なる枠はDBトリガーが拒否します。</p></div>
+      <form class="stack" method="post">
+        <input type="hidden" name="bureau_id" value="{{ selected_bureau_id }}">
+        <div class="field"><label for="schedule_id">共通時間帯</label><select id="schedule_id" name="schedule_id" required><option value="">選択してください</option>{% for schedule in common_schedules %}<option value="{{ schedule.id }}">{{ schedule.start_at }}〜{{ schedule.end_at[11:] }}</option>{% endfor %}</select></div>
+        <button class="primary" type="submit">追加する</button>
+      </form>
+    </section>
+  </div>
+{% endblock %}

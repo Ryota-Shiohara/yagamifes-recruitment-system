@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}応募者一覧 | 新規局員採用システム{% endblock %}
+{% block content %}
+  <div class="page-heading">
+    <div><p class="eyebrow">MANAGEMENT</p><h1>応募者一覧</h1><p>VIEWを利用し、局・氏名・日程・採否で検索します。</p></div>
+    <a class="button primary" href="{{ url_for('applicant_new') }}">新規応募</a>
+  </div>
+  <form class="toolbar panel" method="get">
+    <div class="field compact"><label for="bureau_id">局</label><select id="bureau_id" name="bureau_id"><option value="">すべて</option>{% for bureau in bureaus %}<option value="{{ bureau.id }}" {% if selected_bureau_id == bureau.id %}selected{% endif %}>{{ bureau.name }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="name">氏名</label><input id="name" name="name" value="{{ name }}" placeholder="部分一致"></div>
+    <div class="field compact"><label for="schedule_status">面接日程</label><select id="schedule_status" name="schedule_status"><option value="all">すべて</option><option value="confirmed" {% if schedule_status == 'confirmed' %}selected{% endif %}>確定済み</option><option value="unconfirmed" {% if schedule_status == 'unconfirmed' %}selected{% endif %}>未確定</option></select></div>
+    <div class="field compact"><label for="decision">状態</label><select id="decision" name="decision"><option value="all">すべて</option><option value="undecided" {% if decision == 'undecided' %}selected{% endif %}>未決定</option><option value="accepted" {% if decision == 'accepted' %}selected{% endif %}>採用</option><option value="waitlisted" {% if decision == 'waitlisted' %}selected{% endif %}>保留</option><option value="rejected" {% if decision == 'rejected' %}selected{% endif %}>不採用</option><option value="withdrawn" {% if decision == 'withdrawn' %}selected{% endif %}>辞退</option></select></div>
+    <button class="primary" type="submit">検索</button>
+  </form>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>ID</th><th>氏名</th><th>希望局</th><th>確定面接</th><th>採否</th><th></th></tr></thead>
+      <tbody>
+        {% for applicant in applicants %}
+          <tr>
+            <td>{{ applicant.applicant_id }}</td><td><strong>{{ applicant.applicant_name }}</strong><br><small>{{ applicant.email }}</small></td><td>{{ applicant.bureau_name }}</td>
+            <td>{% if applicant.start_at %}{{ applicant.start_at }}〜{{ applicant.end_at[11:] }}{% else %}<span class="badge muted">未確定</span>{% endif %}</td>
+            <td><span class="badge {% if applicant.decision == 'rejected' %}danger{% elif applicant.decision == 'waitlisted' %}warning{% elif not applicant.decision %}muted{% endif %}">{{ decision_labels.get(applicant.decision) }}</span></td>
+            <td><a class="button secondary small" href="{{ url_for('applicant_detail', id=applicant.applicant_id) }}">詳細</a></td>
+          </tr>
+        {% else %}<tr><td class="empty" colspan="6">条件に一致する応募者はいません。</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

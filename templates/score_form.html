@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}評価入力 | 新規局員採用システム{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><p class="eyebrow">{{ context.bureau_name }}</p><h1>{{ context.applicant_name }}を評価</h1><p>評価者: {{ context.interviewer_name }}</p></div></div>
+  {% if errors %}<div class="notice error"><strong>すべての項目を確認してください。</strong><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div>{% endif %}
+  <form class="panel stack" method="post">
+    {% for criterion in criteria %}
+      <div class="field">
+        <label for="score_{{ criterion.id }}">{{ criterion.name }}</label>
+        <span class="help">{{ criterion.description }}</span>
+        <input id="score_{{ criterion.id }}" name="score_{{ criterion.id }}" type="number" min="1" max="10" step="1" required value="{{ entered_scores.get(criterion.id, '') }}">
+      </div>
+    {% endfor %}
+    <p class="help">1〜10の整数で入力します。一項目でも不正な場合は全項目をロールバックします。</p>
+    <div class="button-row"><button class="primary" type="submit">全項目を保存</button><a class="button secondary" href="{{ url_for('interviewer_evaluations', id=context.interviewer_id) }}">戻る</a></div>
+  </form>
+{% endblock %}

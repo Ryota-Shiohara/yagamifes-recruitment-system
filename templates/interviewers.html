@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}面接官メニュー | 新規局員採用システム{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><p class="eyebrow">INTERVIEWERS</p><h1>評価入力</h1><p>面接官を選択し、同じ局の応募者を評価します。</p></div></div>
+  <div class="card-grid three">
+    {% for interviewer in interviewers %}
+      <article class="feature-card">
+        <span class="badge">{{ interviewer.bureau_name }}</span>
+        <h3>{{ interviewer.name }}</h3>
+        <p>{{ '局責任者' if interviewer.role == 'chief' else '面接官' }} / 面接確定 {{ interviewer.confirmed_applicant_count }}人</p>
+        <a href="{{ url_for('interviewer_evaluations', id=interviewer.id) }}">担当局の応募者を見る →</a>
+      </article>
+    {% endfor %}
+  </div>
+{% endblock %}

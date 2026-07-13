@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}{{ applicant.applicant_name }} | 応募者詳細{% endblock %}
+{% block content %}
+  <div class="page-heading">
+    <div><p class="eyebrow">APPLICANT #{{ applicant.applicant_id }}</p><h1>{{ applicant.applicant_name }}</h1><p>{{ applicant.bureau_name }}への応募情報と選考状況</p></div>
+    <div class="button-row"><a class="button secondary" href="{{ url_for('applicant_edit', id=applicant.applicant_id) }}">応募情報を編集</a><a class="button secondary" href="{{ url_for('applicants') }}">一覧へ</a></div>
+  </div>
+  {% if message %}<p class="notice success">{{ message }}</p>{% endif %}
+  {% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+  <div class="detail-grid">
+    <section class="panel">
+      <h2>基本情報</h2>
+      <dl class="detail-list">
+        <dt>メール</dt><dd>{{ applicant.email }}</dd><dt>希望局</dt><dd>{{ applicant.bureau_name }}</dd>
+        <dt>確定面接</dt><dd>{% if applicant.start_at %}{{ applicant.start_at }}〜{{ applicant.end_at[11:] }}{% else %}未確定{% endif %}</dd>
+        <dt>採否</dt><dd>{{ decision_labels.get(applicant.decision) }}</dd><dt>備考</dt><dd>{{ applicant.remark or 'なし' }}</dd>
+      </dl>
+    </section>
+    <section class="panel stack">
+      <h2>確定面接枠</h2>
+      <form class="inline-form" method="post" action="{{ url_for('applicant_schedule', id=applicant.applicant_id) }}">
+        <select name="bureau_schedule_id" aria-label="確定面接枠">
+          <option value="">未確定に戻す</option>
+          {% for slot in availabilities %}<option value="{{ slot.id }}" {% if applicant.confirmed_bureau_schedule_id == slot.id %}selected{% endif %} {% if slot.booked_applicant_id and slot.booked_applicant_id != applicant.applicant_id %}disabled{% endif %}>{{ slot.start_at }}〜{{ slot.end_at[11:] }}{% if slot.booked_applicant_id and slot.booked_applicant_id != applicant.applicant_id %}（予約済み）{% endif %}</option>{% endfor %}
+        </select><button class="primary" type="submit">更新</button>
+      </form>
+      <p class="help">応募者が希望した枠のみ選択できます。二重予約はUNIQUE制約でも防止します。</p>
+      <h2>採否決定</h2>
+      <form class="inline-form" method="post" action="{{ url_for('applicant_decision', id=applicant.applicant_id) }}">
+        <select name="decision"><option value="">未決定</option><option value="accepted" {% if applicant.decision == 'accepted' %}selected{% endif %}>採用</option><option value="waitlisted" {% if applicant.decision == 'waitlisted' %}selected{% endif %}>保留</option><option value="rejected" {% if applicant.decision == 'rejected' %}selected{% endif %}>不採用</option><option value="withdrawn" {% if applicant.decision == 'withdrawn' %}selected{% endif %}>辞退</option></select><button class="primary" type="submit">確定</button>
+      </form>
+    </section>
+  </div>
+  <section class="section-block panel">
+    <h2>希望面接枠</h2>
+    <div class="table-wrap"><table><thead><tr><th>開始</th><th>終了</th><th>状態</th></tr></thead><tbody>{% for slot in availabilities %}<tr><td>{{ slot.start_at }}</td><td>{{ slot.end_at }}</td><td>{% if applicant.confirmed_bureau_schedule_id == slot.id %}<span class="badge">この応募者で確定</span>{% elif slot.booked_applicant_id %}<span class="badge warning">{{ slot.booked_applicant_name }}で予約済み</span>{% else %}<span class="badge muted">空き</span>{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+  </section>
+  <section class="section-block panel">
+    <h2>評価入力状況</h2>
+    <div class="table-wrap"><table><thead><tr><th>面接官</th><th>入力数</th><th>状態</th><th></th></tr></thead><tbody>{% for progress in evaluation_progress %}<tr><td>{{ progress.interviewer_name }}</td><td>{{ progress.score_count }} / {{ progress.criterion_count }}</td><td>{% if progress.score_count == progress.criterion_count %}<span class="badge">完了</span>{% else %}<span class="badge muted">未完了</span>{% endif %}</td><td><a class="button secondary small" href="{{ url_for('score_edit', interviewer_id=progress.interviewer_id, applicant_id=applicant.applicant_id) }}">評価する</a></td></tr>{% endfor %}</tbody></table></div>
+  </section>
+{% endblock %}

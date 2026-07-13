@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}面接枠編集 | 新規局員採用システム{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><p class="eyebrow">SCHEDULE #{{ slot.id }}</p><h1>面接枠を編集</h1><p>{{ slot.bureau_name }} / 現在 {{ slot.start_at }}〜{{ slot.end_at[11:] }}</p></div></div>
+  {% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+  <form class="panel stack" method="post">
+    <div class="field"><label for="schedule_id">共通時間帯</label><select id="schedule_id" name="schedule_id" required>{% for schedule in common_schedules %}<option value="{{ schedule.id }}" {% if schedule.id == slot.schedule_id %}selected{% endif %}>{{ schedule.start_at }}〜{{ schedule.end_at[11:] }}</option>{% endfor %}</select></div>
+    {% if slot.reference_count > 0 %}<p class="notice error">この枠は{{ slot.reference_count }}件の希望から参照されているため、時間を変更できません。</p>{% endif %}
+    <div class="button-row"><button class="primary" type="submit">更新する</button><a class="button secondary" href="{{ url_for('bureau_schedules', bureau_id=slot.bureau_id) }}">戻る</a></div>
+  </form>
+{% endblock %}

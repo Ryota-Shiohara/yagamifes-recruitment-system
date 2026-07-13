@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ interviewer.name }}の評価 | 新規局員採用システム{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><p class="eyebrow">{{ interviewer.bureau_name }}</p><h1>{{ interviewer.name }}</h1><p>同じ局の面接確定済み応募者を評価できます。</p></div><a class="button secondary" href="{{ url_for('interviewers') }}">面接官一覧</a></div>
+  {% if message %}<p class="notice success">{{ message }}</p>{% endif %}
+  <div class="table-wrap"><table><thead><tr><th>面接日時</th><th>応募者</th><th>入力状況</th><th></th></tr></thead><tbody>
+    {% for applicant in applicants %}<tr><td>{{ applicant.start_at }}<br><small>〜 {{ applicant.end_at }}</small></td><td><strong>{{ applicant.name }}</strong></td><td>{{ applicant.score_count }} / {{ applicant.criterion_count }}{% if applicant.score_count == applicant.criterion_count %} <span class="badge">完了</span>{% else %} <span class="badge muted">未完了</span>{% endif %}</td><td><a class="button primary small" href="{{ url_for('score_edit', interviewer_id=interviewer.id, applicant_id=applicant.id) }}">評価入力</a></td></tr>
+    {% else %}<tr><td class="empty" colspan="4">面接が確定した応募者はいません。</td></tr>{% endfor %}
+  </tbody></table></div>
+{% endblock %}

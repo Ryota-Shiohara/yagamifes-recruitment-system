@@ -1,759 +1,1030 @@
 #!/usr/keio/Anaconda3-2025.12-2/bin/python
-"""
-データベースを使った Web アプリケーションのサンプル.
-
-細田 真道
-"""
+"""矢上祭実行委員会の新規局員採用を題材にしたDB Webアプリ。"""
 
 import sqlite3
-from typing import Final, Optional, Union
+from typing import Final, Optional
 import unicodedata
 
 from flask import Flask, g, redirect, render_template, request, url_for
 from werkzeug import Response
 
-# データベースのファイル名
-DATABASE: Final[str] = 'database.db'
 
-# Flask クラスのインスタンス
-app = Flask(__name__)
-
-# 処理結果コードとメッセージ
-RESULT_MESSAGES: Final[dict[str, str]] = {
-    'id-has-invalid-charactor':
-    '指定された社員番号には使えない文字があります - '
-    '数字のみで指定してください',
-    'id-already-exists':
-    '指定された社員番号は既に存在します - '
-    '存在しない社員番号を指定してください',
-    'id-does-not-exist':
-    '指定された社員番号は存在しません',
-    'id-is-manager':
-    '指定された社員番号の社員には部下がいます - '
-    '部下に登録された上司を変更してから削除してください',
-    'manager-id-has-invalid-charactor':
-    '指定された上司の社員番号には使えない文字があります - '
-    '数字のみで指定してください',
-    'manager-id-does-not-exist':
-    '指定された上司の社員番号が存在しません - '
-    '既に存在する社員番号か追加する社員の社員番号と同じものを指定してください',
-    'salary-has-invalid-charactor':
-    '指定された給与には使えない文字があります - '
-    '数字のみで指定してください',
-    'birth-year-has-invalid-charactor':
-    '指定された生年には使えない文字があります - '
-    '数字のみで指定してください',
-    'start-year-has-invalid-charactor':
-    '指定された入社年には使えない文字があります - '
-    '数字のみで指定してください',
-    'name-has-control-charactor':
-    '指定された名前には制御文字があります - '
-    '制御文字は指定しないでください',
-    'database-error':
-    'データベースエラー',
-    'added':
-    '社員を追加しました',
-    'deleted':
-    '削除しました',
-    'updated':
-    '更新しました'
+DATABASE = 'database.db'
+MAX_NAME_LENGTH: Final[int] = 80
+MAX_EMAIL_LENGTH: Final[int] = 254
+MAX_REMARK_LENGTH: Final[int] = 500
+DECISION_LABELS: Final[dict[Optional[str], str]] = {
+    None: '未決定',
+    'accepted': '採用',
+    'rejected': '不採用',
+    'waitlisted': '保留',
+    'withdrawn': '辞退',
 }
+
+app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 64 * 1024
 
 
 def get_db() -> sqlite3.Connection:
-    """
-    データベース接続を得る.
-
-    リクエスト処理中にデータベース接続が必要になったら呼ぶ関数。
-
-    Flask の g にデータベース接続が保存されていたらその接続を返す。
-    そうでなければデータベース接続して g に保存しつつ接続を返す。
-    その際に、カラム名でフィールドにアクセスできるように設定変更する。
-
-    https://flask.palletsprojects.com/en/3.0.x/patterns/sqlite3/
-    のサンプルにある関数を流用し設定変更を追加。
-
-    Returns:
-      sqlite3.connect: データベース接続
-    """
+    """リクエスト中で共有するSQLite接続を返す。"""
     db = getattr(g, '_database', None)
     if db is None:
         db = g._database = sqlite3.connect(DATABASE)
-        db.execute('PRAGMA foreign_keys = ON')  # 外部キー制約を有効化
-        db.row_factory = sqlite3.Row  # カラム名でアクセスできるよう設定変更
+        db.execute('PRAGMA foreign_keys = ON')
+        db.execute('PRAGMA busy_timeout = 3000')
+        db.row_factory = sqlite3.Row
     return db
 
 
 @app.teardown_appcontext
 def close_connection(exception: Optional[BaseException]) -> None:
-    """
-    データベース接続を閉じる.
-
-    リクエスト処理の終了時に Flask が自動的に呼ぶ関数。
-
-    Flask の g にデータベース接続が保存されていたら閉じる。
-
-    https://flask.palletsprojects.com/en/3.0.x/patterns/sqlite3/
-    のサンプルにある関数をそのまま流用。
-
-    Args:
-      exception (Optional[BaseException]): 未処理の例外
-    """
+    """リクエスト終了時にSQLite接続を閉じる。"""
     db = getattr(g, '_database', None)
     if db is not None:
         db.close()
 
 
-def has_control_character(s: str) -> bool:
-    """
-    文字列に制御文字が含まれているか否か判定する.
+def has_control_character(value: str) -> bool:
+    """文字列に制御文字が含まれるかを返す。"""
+    return any(unicodedata.category(character) == 'Cc'
+               for character in value)
 
-    Args:
-      s (str): 判定対象文字列
-    Returns:
-      bool: 含まれていれば True 含まれていなければ False
-    """
-    return any(map(lambda c: unicodedata.category(c) == 'Cc', s))
+
+def parse_positive_int(value: Optional[str]) -> Optional[int]:
+    """正の整数文字列を整数へ変換し、不正ならNoneを返す。"""
+    try:
+        parsed = int(value or '')
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def is_valid_email(value: str) -> bool:
+    """課題用の簡易的なメールアドレス形式検証を行う。"""
+    if not value or len(value) > MAX_EMAIL_LENGTH:
+        return False
+    if has_control_character(value) or any(char.isspace() for char in value):
+        return False
+    if value.count('@') != 1:
+        return False
+    local, domain = value.split('@')
+    return bool(
+        local and domain and '.' in domain and not domain.startswith('.')
+    )
+
+
+def get_bureaus() -> list[sqlite3.Row]:
+    """局一覧を返す。"""
+    return get_db().execute(
+        'SELECT id, name, capacity FROM bureaus ORDER BY id'
+    ).fetchall()
+
+
+def get_slots_for_bureau(bureau_id: int) -> list[sqlite3.Row]:
+    """指定局の面接枠を、予約状況とともに返す。"""
+    return get_db().execute(
+        '''
+        SELECT
+            bureau_schedule.id,
+            bureau_schedule.bureau_id,
+            schedule.start_at,
+            schedule.end_at,
+            booked.id AS booked_applicant_id,
+            booked.name AS booked_applicant_name,
+            COUNT(availability.applicant_id) AS availability_count
+        FROM bureau_schedules AS bureau_schedule
+        JOIN schedules AS schedule
+          ON schedule.id = bureau_schedule.schedule_id
+        LEFT JOIN applicants AS booked
+          ON booked.confirmed_bureau_schedule_id = bureau_schedule.id
+        LEFT JOIN applicant_availabilities AS availability
+          ON availability.bureau_schedule_id = bureau_schedule.id
+        WHERE bureau_schedule.bureau_id = ?
+        GROUP BY bureau_schedule.id
+        ORDER BY schedule.start_at, bureau_schedule.id
+        ''',
+        (bureau_id,),
+    ).fetchall()
+
+
+def escape_like(value: str) -> str:
+    """LIKE検索でワイルドカードを通常文字として扱えるようにする。"""
+    return value.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+
+
+def render_error(message: str, status: int = 400):
+    """利用者向けエラーページを返す。"""
+    return render_template('error.html', message=message), status
+
+
+def validate_applicant_form(
+        name: str,
+        email: str,
+        bureau_id: Optional[int],
+        remark: str,
+        availability_values: list[str],
+) -> tuple[list[str], list[int]]:
+    """応募者フォームを検証し、エラーと面接枠IDを返す。"""
+    errors: list[str] = []
+    availability_ids: list[int] = []
+
+    if not name:
+        errors.append('氏名は必須です。')
+    elif len(name) > MAX_NAME_LENGTH:
+        errors.append(f'氏名は{MAX_NAME_LENGTH}文字以内で入力してください。')
+    elif has_control_character(name):
+        errors.append('氏名に制御文字は使用できません。')
+
+    if not is_valid_email(email):
+        errors.append('メールアドレスの形式が正しくありません。')
+
+    if len(remark) > MAX_REMARK_LENGTH:
+        errors.append(f'備考は{MAX_REMARK_LENGTH}文字以内で入力してください。')
+    elif has_control_character(remark):
+        errors.append('備考に制御文字は使用できません。')
+
+    if bureau_id is None:
+        errors.append('希望局を選択してください。')
+    else:
+        bureau = get_db().execute(
+            'SELECT id FROM bureaus WHERE id = ?', (bureau_id,)
+        ).fetchone()
+        if bureau is None:
+            errors.append('指定された局は存在しません。')
+
+    for raw_value in availability_values:
+        slot_id = parse_positive_int(raw_value)
+        if slot_id is None:
+            errors.append('面接可能枠の指定が正しくありません。')
+            break
+        availability_ids.append(slot_id)
+    availability_ids = list(dict.fromkeys(availability_ids))
+
+    if not availability_ids:
+        errors.append('面接可能枠を一つ以上選択してください。')
+    elif bureau_id is not None:
+        placeholders = ','.join('?' for _ in availability_ids)
+        rows = get_db().execute(
+            f'''
+            SELECT id
+            FROM bureau_schedules
+            WHERE bureau_id = ? AND id IN ({placeholders})
+            ''',
+            (bureau_id, *availability_ids),
+        ).fetchall()
+        if len(rows) != len(availability_ids):
+            errors.append('希望局に属さない面接枠が含まれています。')
+
+    return errors, availability_ids
 
 
 @app.route('/')
 def index() -> str:
-    """
-    入口のページ.
-
-    `http://localhost:5000/` へのリクエストがあった時に Flask が呼ぶ関数。
-
-    テンプレート index.html
-    （本アプリケーションの説明や他ページへのリンクがある）
-    をレンダリングして返す。
-
-    Returns:
-      str: ページのコンテンツ
-    """
-    # テンプレートへ何も渡さずにレンダリングしたものを返す
-    return render_template('index.html')
+    """入口ページを表示する。"""
+    stats = get_db().execute(
+        '''
+        SELECT
+            (SELECT COUNT(*) FROM applicants) AS applicant_count,
+            (SELECT COUNT(*) FROM applicants
+             WHERE confirmed_bureau_schedule_id IS NOT NULL)
+                AS confirmed_count,
+            (SELECT COUNT(*) FROM scores) AS score_count
+        ''').fetchone()
+    return render_template('index.html', stats=stats)
 
 
-@app.route('/employees')
-def employees() -> str:
-    """
-    社員一覧のページ（全員）.
+@app.route('/applicants/new', methods=['GET', 'POST'])
+def applicant_new():
+    """応募者と複数の希望面接枠を一括登録する。"""
+    bureaus = get_bureaus()
+    errors: list[str] = []
+    form = {
+        'name': '',
+        'email': '',
+        'bureau_id': request.args.get('bureau_id', ''),
+        'remark': '',
+    }
+    selected_ids: list[int] = []
 
-    `http://localhost:5000/employees` への GET メソッドによる
-    リクエストがあった時に Flask が呼ぶ関数。
+    if request.method == 'POST':
+        form = {
+            'name': request.form.get('name', '').strip(),
+            'email': request.form.get('email', '').strip().lower(),
+            'bureau_id': request.form.get('bureau_id', ''),
+            'remark': request.form.get('remark', '').strip(),
+        }
+        bureau_id = parse_positive_int(form['bureau_id'])
+        errors, selected_ids = validate_applicant_form(
+            form['name'], form['email'], bureau_id, form['remark'],
+            request.form.getlist('availability_ids'),
+        )
+        if not errors and bureau_id is not None:
+            con = get_db()
+            try:
+                con.execute('BEGIN')
+                cursor = con.execute(
+                    '''
+                    INSERT INTO applicants
+                        (name, email, bureau_id, remark)
+                    VALUES (?, ?, ?, ?)
+                    ''',
+                    (form['name'], form['email'], bureau_id, form['remark']),
+                )
+                applicant_id = cursor.lastrowid
+                con.executemany(
+                    '''
+                    INSERT INTO applicant_availabilities
+                        (applicant_id, bureau_schedule_id)
+                    VALUES (?, ?)
+                    ''',
+                    [(applicant_id, slot_id) for slot_id in selected_ids],
+                )
+                con.commit()
+            except sqlite3.IntegrityError as exception:
+                con.rollback()
+                if 'applicants.email' in str(exception):
+                    errors.append('このメールアドレスは既に登録されています。')
+                else:
+                    errors.append('入力内容がデータベースの制約に違反しています。')
+            except sqlite3.Error:
+                con.rollback()
+                errors.append('データベースエラーのため登録できませんでした。')
+            else:
+                return redirect(url_for(
+                    'applicant_detail', id=applicant_id,
+                    message='応募情報を登録しました。',
+                ))
 
-    データベース接続を得て、SELECT 文で全社員一覧を取得し、
-    テンプレート employees.html へ一覧を渡して埋め込んでレンダリングして返す。
+    selected_bureau_id = parse_positive_int(form['bureau_id'])
+    slots = (get_slots_for_bureau(selected_bureau_id)
+             if selected_bureau_id is not None else [])
+    return render_template(
+        'applicant_form.html',
+        title='応募登録',
+        action_label='登録する',
+        form=form,
+        bureaus=bureaus,
+        slots=slots,
+        selected_ids=selected_ids,
+        errors=errors,
+        bureau_locked=False,
+    )
 
-    Returns:
-      str: ページのコンテンツ
-    """
-    # データベース接続してカーソルを得る
-    cur = get_db().cursor()
 
-    # employees テーブルの全行から社員番号と氏名を取り出した一覧を取得
-    e_list = cur.execute('SELECT id, name FROM employees').fetchall()
+@app.route('/applicants')
+def applicants() -> str:
+    """VIEWを利用して応募者一覧を検索する。"""
+    bureau_id = parse_positive_int(request.args.get('bureau_id'))
+    name = request.args.get('name', '').strip()
+    schedule_status = request.args.get('schedule_status', 'all')
+    decision = request.args.get('decision', 'all')
 
-    # 一覧をテンプレートへ渡してレンダリングしたものを返す
-    return render_template('employees.html', e_list=e_list)
+    clauses: list[str] = []
+    parameters: list[object] = []
+    if bureau_id is not None:
+        clauses.append('bureau_id = ?')
+        parameters.append(bureau_id)
+    if name:
+        clauses.append("applicant_name LIKE ? ESCAPE '\\'")
+        parameters.append(f'%{escape_like(name)}%')
+    if schedule_status == 'confirmed':
+        clauses.append('confirmed_bureau_schedule_id IS NOT NULL')
+    elif schedule_status == 'unconfirmed':
+        clauses.append('confirmed_bureau_schedule_id IS NULL')
+    if decision == 'undecided':
+        clauses.append('decision IS NULL')
+    elif decision in ('accepted', 'rejected', 'waitlisted', 'withdrawn'):
+        clauses.append('decision = ?')
+        parameters.append(decision)
+
+    sql = 'SELECT * FROM applicant_overview'
+    if clauses:
+        sql += ' WHERE ' + ' AND '.join(clauses)
+    sql += ' ORDER BY bureau_id, applicant_id'
+    rows = get_db().execute(sql, parameters).fetchall()
+    return render_template(
+        'applicants.html',
+        applicants=rows,
+        bureaus=get_bureaus(),
+        selected_bureau_id=bureau_id,
+        name=name,
+        schedule_status=schedule_status,
+        decision=decision,
+        decision_labels=DECISION_LABELS,
+    )
 
 
-@app.route('/employees', methods=['POST'])
-def employees_filtered() -> str:
-    """
-    社員一覧のページ（絞り込み）.
+@app.route('/applicants/<id>')
+def applicant_detail(id: str):
+    """応募者の希望枠、確定枠、評価進捗を表示する。"""
+    applicant_id = parse_positive_int(id)
+    if applicant_id is None:
+        return render_error('応募者IDが正しくありません。', 404)
+    applicant = get_db().execute(
+        'SELECT * FROM applicant_overview WHERE applicant_id = ?',
+        (applicant_id,),
+    ).fetchone()
+    if applicant is None:
+        return render_error('指定された応募者は存在しません。', 404)
 
-    `http://localhost:5000/employees` への POST メソッドによる
-    リクエストがあった時に Flask が呼ぶ関数。
-    絞り込み用の氏名が POST のパラメータ `name_filter` に入っている。
+    availabilities = get_db().execute(
+        '''
+        SELECT
+            bureau_schedule.id,
+            schedule.start_at,
+            schedule.end_at,
+            booked.id AS booked_applicant_id,
+            booked.name AS booked_applicant_name
+        FROM applicant_availabilities AS availability
+        JOIN bureau_schedules AS bureau_schedule
+          ON bureau_schedule.id = availability.bureau_schedule_id
+        JOIN schedules AS schedule
+          ON schedule.id = bureau_schedule.schedule_id
+        LEFT JOIN applicants AS booked
+          ON booked.confirmed_bureau_schedule_id = bureau_schedule.id
+        WHERE availability.applicant_id = ?
+        ORDER BY schedule.start_at
+        ''',
+        (applicant_id,),
+    ).fetchall()
+    evaluation_progress = get_db().execute(
+        '''
+        SELECT
+            interviewer.id AS interviewer_id,
+            interviewer.name AS interviewer_name,
+            COUNT(score.criterion_id) AS score_count,
+            (SELECT COUNT(*) FROM criteria
+             WHERE bureau_id = interviewer.bureau_id) AS criterion_count
+        FROM interviewers AS interviewer
+        LEFT JOIN scores AS score
+          ON score.interviewer_id = interviewer.id
+         AND score.applicant_id = ?
+        WHERE interviewer.bureau_id = ?
+        GROUP BY interviewer.id
+        ORDER BY interviewer.id
+        ''',
+        (applicant_id, applicant['bureau_id']),
+    ).fetchall()
+    return render_template(
+        'applicant_detail.html',
+        applicant=applicant,
+        availabilities=availabilities,
+        evaluation_progress=evaluation_progress,
+        decision_labels=DECISION_LABELS,
+        message=request.args.get('message', ''),
+        error=request.args.get('error', ''),
+    )
 
-    データベース接続を得て、
-    SELECT 文でリクエストされた氏名で絞り込んだ社員一覧を取得、
-    テンプレート employees.html へ一覧を渡して埋め込んでレンダリングして返す。
-    （これは PRG パターンではない）
 
-    Returns:
-      str: ページのコンテンツ
-    """
-    # データベース接続してカーソルを得る
+@app.route('/applicants/<id>/edit', methods=['GET', 'POST'])
+def applicant_edit(id: str):
+    """応募者情報と希望枠をトランザクションで更新する。"""
+    applicant_id = parse_positive_int(id)
+    if applicant_id is None:
+        return render_error('応募者IDが正しくありません。', 404)
+    applicant = get_db().execute(
+        'SELECT * FROM applicants WHERE id = ?', (applicant_id,)
+    ).fetchone()
+    if applicant is None:
+        return render_error('指定された応募者は存在しません。', 404)
+
+    errors: list[str] = []
+    selected_ids = [row['bureau_schedule_id'] for row in get_db().execute(
+        '''SELECT bureau_schedule_id FROM applicant_availabilities
+           WHERE applicant_id = ?''', (applicant_id,)
+    ).fetchall()]
+    form = {
+        'name': applicant['name'],
+        'email': applicant['email'],
+        'bureau_id': str(applicant['bureau_id']),
+        'remark': applicant['remark'],
+    }
+
+    if request.method == 'POST':
+        form['name'] = request.form.get('name', '').strip()
+        form['email'] = request.form.get('email', '').strip().lower()
+        form['remark'] = request.form.get('remark', '').strip()
+        errors, selected_ids = validate_applicant_form(
+            form['name'], form['email'], applicant['bureau_id'],
+            form['remark'],
+            request.form.getlist('availability_ids'),
+        )
+        confirmed_id = applicant['confirmed_bureau_schedule_id']
+        if confirmed_id is not None and confirmed_id not in selected_ids:
+            errors.append('確定済みの面接枠は希望枠から外せません。')
+
+        if not errors:
+            con = get_db()
+            try:
+                con.execute('BEGIN')
+                con.execute(
+                    '''UPDATE applicants SET name = ?, email = ?, remark = ?
+                       WHERE id = ?''',
+                    (form['name'], form['email'],
+                     form['remark'], applicant_id),
+                )
+                con.executemany(
+                    '''INSERT OR IGNORE INTO applicant_availabilities
+                       (applicant_id, bureau_schedule_id) VALUES (?, ?)''',
+                    [(applicant_id, slot_id) for slot_id in selected_ids],
+                )
+                placeholders = ','.join('?' for _ in selected_ids)
+                con.execute(
+                    f'''DELETE FROM applicant_availabilities
+                        WHERE applicant_id = ?
+                          AND bureau_schedule_id NOT IN ({placeholders})''',
+                    (applicant_id, *selected_ids),
+                )
+                con.commit()
+            except sqlite3.IntegrityError as exception:
+                con.rollback()
+                if 'applicants.email' in str(exception):
+                    errors.append('このメールアドレスは既に登録されています。')
+                else:
+                    errors.append('入力内容がデータベースの制約に違反しています。')
+            except sqlite3.Error:
+                con.rollback()
+                errors.append('データベースエラーのため更新できませんでした。')
+            else:
+                return redirect(url_for(
+                    'applicant_detail', id=applicant_id,
+                    message='応募情報を更新しました。',
+                ))
+
+    return render_template(
+        'applicant_form.html',
+        title='応募情報の編集',
+        action_label='更新する',
+        form=form,
+        bureaus=get_bureaus(),
+        slots=get_slots_for_bureau(applicant['bureau_id']),
+        selected_ids=selected_ids,
+        errors=errors,
+        bureau_locked=True,
+    )
+
+
+@app.route('/applicants/<id>/schedule', methods=['POST'])
+def applicant_schedule(id: str) -> Response:
+    """希望枠の一つを確定面接枠として割り当てる。"""
+    applicant_id = parse_positive_int(id)
+    if applicant_id is None:
+        return redirect(url_for('applicants'))
+    raw_slot_id = request.form.get('bureau_schedule_id', '')
+    slot_id = None if raw_slot_id == '' else parse_positive_int(raw_slot_id)
+    if raw_slot_id != '' and slot_id is None:
+        return redirect(url_for(
+            'applicant_detail', id=applicant_id,
+            error='面接枠の指定が正しくありません。',
+        ))
+
     con = get_db()
-    cur = con.cursor()
+    applicant = con.execute(
+        'SELECT id FROM applicants WHERE id = ?', (applicant_id,)
+    ).fetchone()
+    if applicant is None:
+        return redirect(url_for('applicants'))
+    if slot_id is not None:
+        availability = con.execute(
+            '''SELECT 1 FROM applicant_availabilities
+               WHERE applicant_id = ? AND bureau_schedule_id = ?''',
+            (applicant_id, slot_id),
+        ).fetchone()
+        if availability is None:
+            return redirect(url_for(
+                'applicant_detail', id=applicant_id,
+                error='応募者が希望していない面接枠は確定できません。',
+            ))
+    try:
+        con.execute(
+            '''UPDATE applicants SET confirmed_bureau_schedule_id = ?
+               WHERE id = ?''', (slot_id, applicant_id),
+        )
+        con.commit()
+    except sqlite3.IntegrityError as exception:
+        con.rollback()
+        if 'locked after scoring' in str(exception):
+            error = '評価入力後は確定面接枠を変更できません。'
+        else:
+            error = 'その面接枠は既に予約されているか、選択できません。'
+        return redirect(url_for(
+            'applicant_detail', id=applicant_id,
+            error=error,
+        ))
+    return redirect(url_for(
+        'applicant_detail', id=applicant_id,
+        message='確定面接枠を更新しました。',
+    ))
 
-    # employees テーブルから氏名で絞り込み、
-    # 得られた全行から社員番号と氏名を取り出した一覧を取得
-    e_list = cur.execute('SELECT id, name FROM employees WHERE name LIKE ?',
-                         (request.form['name_filter'], )).fetchall()
 
-    # 一覧をテンプレートへ渡してレンダリングしたものを返す
-    return render_template('employees.html', e_list=e_list)
-
-
-@app.route('/employee/<id>')
-def employee(id: str) -> str:
-    """
-    社員詳細ページ.
-
-    `http://localhost:5000/employee/<id>` への GET メソッドによる
-    リクエストがあった時に Flask が呼ぶ関数。
-
-    データベース接続を得て、
-    URL 中の `<id>` で指定された社員番号の社員の全情報を取得し、
-    テンプレート employee.html へ情報を渡して埋め込んでレンダリングして返す。
-    指定された社員が見つからない場合は
-    テンプレート employee-not-found.html
-    （社員が見つからない旨が記載されている）
-    をレンダリングして返す。
-
-    Args:
-      id (str): 指定する社員番号
-    Returns:
-      str: ページのコンテンツ
-    """
-    # データベース接続してカーソルを得る
+@app.route('/applicants/<id>/decision', methods=['POST'])
+def applicant_decision(id: str) -> Response:
+    """局責任者による採否決定を保存する。"""
+    applicant_id = parse_positive_int(id)
+    if applicant_id is None:
+        return redirect(url_for('applicants'))
+    raw_decision = request.form.get('decision', '')
+    decision = None if raw_decision == '' else raw_decision
+    if decision not in (
+            None, 'accepted', 'rejected', 'waitlisted', 'withdrawn'):
+        return redirect(url_for(
+            'applicant_detail', id=applicant_id,
+            error='採否の指定が正しくありません。',
+        ))
     con = get_db()
-    cur = con.cursor()
-
-    try:
-        # 文字列型で渡された社員番号を整数型へ変換する
-        id_num = int(id)
-    except ValueError:
-        # 社員番号が整数型へ変換できない→不正な社員番号が指定された
-        # →データベースにあたるまでもなくそのような社員は見つからない
-        return render_template('employee-not-found.html')
-
-    # employees テーブルから指定された社員番号の行を 1 行だけ取り出す
-    employee = cur.execute('SELECT * FROM employees WHERE id = ?',
-                           (id_num,)).fetchone()
-
-    if employee is None:
-        # 指定された社員番号の行が無かった
-        return render_template('employee-not-found.html')
-
-    # 社員の情報をテンプレートへ渡してレンダリングしたものを返す
-    return render_template('employee.html', employee=employee)
-
-
-@app.route('/employee-add')
-def employee_add() -> str:
-    """
-    社員追加ページ.
-
-    `http://localhost:5000/employee-add` への GET メソッドによる
-    リクエストがあった時に Flask が呼ぶ関数。
-
-    テンプレート employee-add.html
-    （社員追加フォームがあり、追加ボタンで社員追加実行の POST ができる）
-    をレンダリングして返す。
-
-    Returns:
-      str: ページのコンテンツ
-    """
-    # テンプレートへ何も渡さずにレンダリングしたものを返す
-    return render_template('employee-add.html')
-
-
-@app.route('/employee-add', methods=['POST'])
-def employee_add_execute() -> Response:
-    """
-    社員追加実行.
-
-    `http://localhost:5000/employee-add` への POST メソッドによる
-    リクエストがあった時に Flask が呼ぶ関数。
-    追加する社員の情報が POST パラメータの
-    `id`, `name`, `salary`, `manager_id`, `birth_year`, `start_year`
-    に入っている。
-
-    データベース接続を得て、POST パラメータの各内容をチェック、
-    問題なければ新しい社員として追加し、
-    employee_add_results へ処理結果コードを入れてリダイレクトする。
-    （PRG パターンの P を受けて R を返す）
-
-    Returns:
-      Response: リダイレクト情報
-    """
-    # データベース接続してカーソルを得る
-    con = get_db()
-    cur = con.cursor()
-
-    # リクエストされた POST パラメータの内容を取り出す
-    id_str = request.form['id']
-    name = request.form['name']
-    salary_str = request.form['salary']
-    manager_id_str = request.form['manager_id']
-    birth_year_str = request.form['birth_year']
-    start_year_str = request.form['start_year']
-
-    #
-    # 社員番号チェック
-    #
-    try:
-        # 文字列型で渡された社員番号を整数型へ変換する
-        id = int(id_str)
-    except ValueError:
-        # 社員番号が整数型へ変換できない
-        return redirect(url_for('employee_add_results',
-                                code='id-has-invalid-charactor'))
-    # 社員番号の存在チェックをする：
-    # employees テーブルで同じ社員番号の行を 1 行だけ取り出す
-    employee = cur.execute('SELECT id FROM employees WHERE id = ?',
-                           (id,)).fetchone()
-    if employee is not None:
-        # 指定された社員番号の行が既に存在
-        return redirect(url_for('employee_add_results',
-                                code='id-already-exists'))
-
-    #
-    # 上司の社員番号チェック
-    #
-    try:
-        # 文字列型で渡された社員番号を整数型へ変換する
-        manager_id = int(manager_id_str)
-    except ValueError:
-        # 社員番号が整数型へ変換できない
-        return redirect(url_for('employee_add_results',
-                                code='manager-id-has-invalid-charactor'))
-    if id != manager_id:
-        # 指定された社員番号と上司の社員番号が不一致
-        # →上司が別に存在する必要がある→上司の存在チェックをする：
-        # employees テーブルで指定された上司の社員番号を持つ社員
-        # の行を 1 行だけ取り出す
-        manager = cur.execute('SELECT id FROM employees WHERE id = ?',
-                              (manager_id,)).fetchone()
-        if manager is None:
-            # 指定された上司が存在しない
-            return redirect(url_for('employee_add_results',
-                                    code='manager-id-does-not-exist'))
-
-    #
-    # 給与チェック
-    #
-    try:
-        # 文字列型で渡された給与を整数型へ変換する
-        salary = int(salary_str)
-    except ValueError:
-        # 給与が整数型へ変換できない
-        return redirect(url_for('employee_add_results',
-                                code='salary-has-invalid-charactor'))
-
-    #
-    # 生年チェック
-    #
-    try:
-        # 文字列型で渡された生年を整数型へ変換する
-        birth_year = int(birth_year_str)
-    except ValueError:
-        # 生年が整数型へ変換できない
-        return redirect(url_for('employee_add_results',
-                                code='birth-year-has-invalid-charactor'))
-
-    #
-    # 入社年チェック
-    #
-    try:
-        # 文字列型で渡された入社年を整数型へ変換する
-        start_year = int(start_year_str)
-    except ValueError:
-        # 入社年が整数型へ変換できない
-        return redirect(url_for('employee_add_results',
-                                code='start-year-has-invalid-charactor'))
-
-    #
-    # 名前チェック
-    #
-    if has_control_character(name):
-        # 名前に制御文字が含まれる
-        return redirect(url_for('employee_add_results',
-                                code='name-has-control-charactor'))
-
-    # データベースへ社員を追加
-    try:
-        # employees テーブルに指定されたパラメータの行を挿入
-        cur.execute('INSERT INTO employees '
-                    '(id, name, salary, manager_id, birth_year, start_year) '
-                    'VALUES (?, ?, ?, ?, ?, ?)',
-                    (id, name, salary, manager_id, birth_year, start_year))
-    except sqlite3.Error:
-        # データベースエラーが発生
-        return redirect(url_for('employee_add_results',
-                                code='database-error'))
-    # コミット（データベース更新処理を確定）
+    cursor = con.execute(
+        'UPDATE applicants SET decision = ? WHERE id = ?',
+        (decision, applicant_id),
+    )
     con.commit()
-
-    # 社員追加完了
-    return redirect(url_for('employee_add_results',
-                            code='added'))
-
-
-@app.route('/employee-add-results/<code>')
-def employee_add_results(code: str) -> str:
-    """
-    社員追加結果ページ.
-
-    `http://localhost:5000/employee-add-result/<code>`
-    への GET メソッドによるリクエストがあった時に Flask が呼ぶ関数。
-
-    PRG パターンで社員追加実行の POST 後にリダイレクトされてくる。
-    テンプレート employee-add-results.html
-    へ処理結果コード code に基づいたメッセージを渡してレンダリングして返す。
-
-    Args:
-      code (str): 処理結果コード
-    Returns:
-      str: ページのコンテンツ
-    """
-    return render_template('employee-add-results.html',
-                           results=RESULT_MESSAGES.get(code, 'code error'))
+    if cursor.rowcount == 0:
+        return redirect(url_for('applicants'))
+    return redirect(url_for(
+        'applicant_detail', id=applicant_id,
+        message='採否を更新しました。',
+    ))
 
 
-@app.route('/employee-del/<id>')
-def employee_del(id: str) -> str:
-    """
-    社員削除確認ページ.
-
-    `http://localhost:5000/employee-del/<id>` への GET メソッドによる
-    リクエストがあった時に Flask が呼ぶ関数。
-
-    データベース接続を得て URL 中の `<id>` で指定された社員情報を取得し、
-    削除できるなら
-    テンプレート employee-del.html
-    （社員削除してよいかの確認ページ）
-    へ社員番号を渡してレンダリングして返す。
-    削除できないなら
-    テンプレート employee-del-results.html
-    へ理由を渡してレンダリングして返す。
-
-    Args:
-      id (str): 指定する社員番号
-    Returns:
-      str: ページのコンテンツ
-    """
-    # データベース接続してカーソルを得る
+@app.route('/bureau-schedules', methods=['GET', 'POST'])
+def bureau_schedules():
+    """局別面接枠を一覧表示し、新規登録する。"""
+    bureau_id = parse_positive_int(
+        request.form.get('bureau_id') if request.method == 'POST'
+        else request.args.get('bureau_id')) or 1
     con = get_db()
-    cur = con.cursor()
+    message = request.args.get('message', '')
+    error = request.args.get('error', '')
 
-    try:
-        # 文字列型で渡された社員番号を整数型へ変換する
-        id_num = int(id)
-    except ValueError:
-        # 社員番号が整数型へ変換できない
-        return render_template('employee-del-results.html',
-                               results='指定された社員番号には'
-                               '使えない文字があります')
-    # 社員番号の存在チェックをする：
-    # employees テーブルで同じ社員番号の行を 1 行だけ取り出す
-    employee = cur.execute('SELECT id FROM employees WHERE id = ?',
-                           (id_num,)).fetchone()
-    if employee is None:
-        # 指定された社員番号の行が無い
-        return render_template('employee-del-results.html',
-                               results='指定された社員番号は存在しません')
+    if request.method == 'POST':
+        schedule_id = parse_positive_int(request.form.get('schedule_id'))
+        if schedule_id is None:
+            error = '共通時間帯を選択してください。'
+        else:
+            try:
+                con.execute(
+                    '''INSERT INTO bureau_schedules (bureau_id, schedule_id)
+                       VALUES (?, ?)''', (bureau_id, schedule_id),
+                )
+                con.commit()
+            except sqlite3.IntegrityError as exception:
+                con.rollback()
+                if 'overlaps' in str(exception):
+                    error = '同じ局の既存面接枠と時間が重複します。'
+                else:
+                    error = 'この局と時間帯の面接枠は登録できません。'
+            except sqlite3.Error:
+                con.rollback()
+                error = 'データベースエラーのため登録できませんでした。'
+            else:
+                return redirect(url_for(
+                    'bureau_schedules', bureau_id=bureau_id,
+                    message='局別面接枠を追加しました。',
+                ))
 
-    # 部下の存在チェック：
-    # employees テーブルで指定された社員番号を上司にしている社員、かつ、
-    # 自分自身ではない、行を 1 行だけ取り出す
-    member = cur.execute('SELECT id FROM employees '
-                         'WHERE manager_id = ? AND id != ?',
-                         (id_num, id_num)).fetchone()
-    if member is not None:
-        # 部下が存在する
-        return render_template('employee-del-results.html',
-                               results='指定された社員番号の社員には'
-                               '部下がいます - '
-                               '部下に登録された上司を変更してから'
-                               '削除してください')
-
-    # 削除対象の社員番号をテンプレートに渡してレンダリングしたものを返す
-    return render_template('employee-del.html', id=id_num)
+    common_schedules = con.execute(
+        '''SELECT id, start_at, end_at FROM schedules ORDER BY start_at'''
+    ).fetchall()
+    return render_template(
+        'bureau_schedules.html',
+        bureaus=get_bureaus(),
+        selected_bureau_id=bureau_id,
+        slots=get_slots_for_bureau(bureau_id),
+        common_schedules=common_schedules,
+        message=message,
+        error=error,
+    )
 
 
-@app.route('/employee-del/<id>', methods=['POST'])
-def employee_del_execute(id: str) -> Response:
-    """
-    社員削除実行.
-
-    `http://localhost:5000/employee-del/<id>` への POST メソッドによる
-    リクエストがあった時に Flask が呼ぶ関数。
-    POST パラメータは無し。
-
-    データベース接続を得て URL 中の `<id>` で指定された社員情報を取得し、
-    削除できるならして、
-    employee_del_results へ処理結果コードを入れてリダイレクトする。
-    （PRG パターンの P を受けて R を返す）
-
-    Args:
-      id (str): 指定する社員番号
-    Returns:
-      Response: リダイレクト情報
-    """
-    # データベース接続してカーソルを得る
+@app.route('/bureau-schedules/<id>/edit', methods=['GET', 'POST'])
+def bureau_schedule_edit(id: str):
+    """未使用の局別面接枠が参照する共通時間帯を変更する。"""
+    slot_id = parse_positive_int(id)
+    if slot_id is None:
+        return render_error('面接枠IDが正しくありません。', 404)
     con = get_db()
-    cur = con.cursor()
+    slot = con.execute(
+        '''
+        SELECT bureau_schedule.id, bureau_schedule.bureau_id,
+               bureau_schedule.schedule_id, bureau.name AS bureau_name,
+               schedule.start_at, schedule.end_at,
+               (SELECT COUNT(*) FROM applicant_availabilities
+                WHERE bureau_schedule_id = bureau_schedule.id)
+                    AS reference_count
+        FROM bureau_schedules AS bureau_schedule
+        JOIN bureaus AS bureau ON bureau.id = bureau_schedule.bureau_id
+        JOIN schedules AS schedule ON schedule.id = bureau_schedule.schedule_id
+        WHERE bureau_schedule.id = ?
+        ''', (slot_id,),
+    ).fetchone()
+    if slot is None:
+        return render_error('指定された面接枠は存在しません。', 404)
 
+    error = ''
+    if request.method == 'POST':
+        schedule_id = parse_positive_int(request.form.get('schedule_id'))
+        if schedule_id is None:
+            error = '共通時間帯を選択してください。'
+        elif (slot['reference_count'] > 0
+              and schedule_id != slot['schedule_id']):
+            error = '応募者が希望している面接枠の時間は変更できません。'
+        else:
+            try:
+                con.execute(
+                    'UPDATE bureau_schedules SET schedule_id = ? WHERE id = ?',
+                    (schedule_id, slot_id),
+                )
+                con.commit()
+            except sqlite3.IntegrityError as exception:
+                con.rollback()
+                if 'overlaps' in str(exception):
+                    error = '同じ局の既存面接枠と時間が重複します。'
+                else:
+                    error = '指定された時間帯へ変更できません。'
+            else:
+                return redirect(url_for(
+                    'bureau_schedules', bureau_id=slot['bureau_id'],
+                    message='局別面接枠を更新しました。',
+                ))
+    common_schedules = con.execute(
+        'SELECT id, start_at, end_at FROM schedules ORDER BY start_at'
+    ).fetchall()
+    return render_template(
+        'bureau_schedule_edit.html',
+        slot=slot,
+        common_schedules=common_schedules,
+        error=error,
+    )
+
+
+@app.route('/bureau-schedules/<id>/delete', methods=['POST'])
+def bureau_schedule_delete(id: str) -> Response:
+    """応募者から参照されていない局別面接枠を削除する。"""
+    slot_id = parse_positive_int(id)
+    if slot_id is None:
+        return redirect(url_for('bureau_schedules'))
+    con = get_db()
+    slot = con.execute(
+        'SELECT bureau_id FROM bureau_schedules WHERE id = ?', (slot_id,)
+    ).fetchone()
+    if slot is None:
+        return redirect(url_for('bureau_schedules'))
+    reference_count = con.execute(
+        '''
+        SELECT
+            (SELECT COUNT(*) FROM applicant_availabilities
+             WHERE bureau_schedule_id = ?)
+          + (SELECT COUNT(*) FROM applicants
+             WHERE confirmed_bureau_schedule_id = ?) AS reference_count
+        ''', (slot_id, slot_id),
+    ).fetchone()['reference_count']
+    if reference_count > 0:
+        return redirect(url_for(
+            'bureau_schedules', bureau_id=slot['bureau_id'],
+            error='応募者から参照されている面接枠は削除できません。',
+        ))
     try:
-        # 文字列型で渡された社員番号を整数型へ変換する
-        id_num = int(id)
-    except ValueError:
-        # 社員番号が整数型へ変換できない
-        return redirect(url_for('employee_del_results',
-                                code='id-has-invalid-charactor'))
-    # 社員番号の存在チェックをする：
-    # employees テーブルで同じ社員番号の行を 1 行だけ取り出す
-    employee = cur.execute('SELECT id FROM employees WHERE id = ?',
-                           (id_num,)).fetchone()
-    if employee is None:
-        # 指定された社員番号の行が無い
-        return redirect(url_for('employee_del_results',
-                                code='id-does-not-exsit'))
-
-    # 部下の存在チェック：
-    # employees テーブルで指定された社員番号を上司にしている社員、かつ、
-    # 自分自身ではない、行を 1 行だけ取り出す
-    member = cur.execute('SELECT id FROM employees '
-                         'WHERE manager_id = ? AND id != ?',
-                         (id_num, id_num)).fetchone()
-    if member is not None:
-        # 部下が存在する
-        return redirect(url_for('employee_del_results',
-                                code='id-is-manager'))
-
-    # データベースから削除
-    try:
-        # employees テーブルの指定された行を削除
-        cur.execute('DELETE FROM employees WHERE id = ?', (id_num,))
+        con.execute('DELETE FROM bureau_schedules WHERE id = ?', (slot_id,))
+        con.commit()
     except sqlite3.Error:
-        # データベースエラーが発生
-        return redirect(url_for('employee_add_results',
-                                code='database-error'))
-    # コミット（データベース更新処理を確定）
-    con.commit()
-
-    # 社員追加完了
-    return redirect(url_for('employee_add_results',
-                            code='deleted'))
-
-
-@app.route('/employee-del-results/<code>')
-def employee_del_results(code: str) -> str:
-    """
-    社員削除結果ページ.
-
-    `http://localhost:5000/employee-del-result/<code>`
-    への GET メソッドによるリクエストがあった時に Flask が呼ぶ関数。
-
-    PRG パターンで社員削除実行の POST 後にリダイレクトされてくる。
-    テンプレート employee-del-results.html
-    へ処理結果コード code に基づいたメッセージを渡してレンダリングして返す。
-
-    Args:
-      code (str): 処理結果コード
-    Returns:
-      str: ページのコンテンツ
-    """
-    return render_template('employee-del-results.html',
-                           results=RESULT_MESSAGES.get(code, 'code error'))
+        con.rollback()
+        return redirect(url_for(
+            'bureau_schedules', bureau_id=slot['bureau_id'],
+            error='データベースエラーのため削除できませんでした。',
+        ))
+    return redirect(url_for(
+        'bureau_schedules', bureau_id=slot['bureau_id'],
+        message='局別面接枠を削除しました。',
+    ))
 
 
-@app.route('/employee-edit/<id>')
-def employee_edit(id: str) -> str:
-    """
-    社員編集ページ.
+@app.route('/interviewers')
+def interviewers() -> str:
+    """面接官メニューを表示する。"""
+    rows = get_db().execute(
+        '''
+        SELECT interviewer.id, interviewer.name, interviewer.role,
+               bureau.id AS bureau_id, bureau.name AS bureau_name,
+               COUNT(applicant.id) AS confirmed_applicant_count
+        FROM interviewers AS interviewer
+        JOIN bureaus AS bureau ON bureau.id = interviewer.bureau_id
+        LEFT JOIN applicants AS applicant
+          ON applicant.bureau_id = interviewer.bureau_id
+         AND applicant.confirmed_bureau_schedule_id IS NOT NULL
+        GROUP BY interviewer.id
+        ORDER BY bureau.id, interviewer.id
+        ''').fetchall()
+    return render_template('interviewers.html', interviewers=rows)
 
-    `http://localhost:5000/employee-edit/<id>` への GET メソッドによる
-    リクエストがあった時に Flask が呼ぶ関数。
 
-    データベース接続を得て URL 中の `<id>` で指定された社員情報を取得し、
-    編集できるなら
-    テンプレート employee-edit.html
-    （社員編集フォームがあり、決定ボタンで社員編集更新の POST ができる）
-    へ情報を渡してレンダリングして返す。
-    編集できないなら
-    テンプレート employee-edit-results.html
-    へ理由を渡してレンダリングして返す。
-
-    Args:
-      id (str): 指定する社員番号
-    Returns:
-      str: ページのコンテンツ
-    """
-    # データベース接続してカーソルを得る
+@app.route('/interviewers/<id>/evaluations')
+def interviewer_evaluations(id: str):
+    """指定面接官と同じ局の面接確定済み応募者を表示する。"""
+    interviewer_id = parse_positive_int(id)
+    if interviewer_id is None:
+        return render_error('面接官IDが正しくありません。', 404)
     con = get_db()
-    cur = con.cursor()
+    interviewer = con.execute(
+        '''SELECT interviewer.*, bureau.name AS bureau_name
+           FROM interviewers AS interviewer
+           JOIN bureaus AS bureau ON bureau.id = interviewer.bureau_id
+           WHERE interviewer.id = ?''', (interviewer_id,)
+    ).fetchone()
+    if interviewer is None:
+        return render_error('指定された面接官は存在しません。', 404)
+    applicants_for_evaluation = con.execute(
+        '''
+        SELECT applicant.id, applicant.name, schedule.start_at,
+               schedule.end_at, COUNT(score.criterion_id) AS score_count,
+               (SELECT COUNT(*) FROM criteria
+                WHERE bureau_id = applicant.bureau_id) AS criterion_count
+        FROM applicants AS applicant
+        JOIN bureau_schedules AS bureau_schedule
+          ON bureau_schedule.id = applicant.confirmed_bureau_schedule_id
+        JOIN schedules AS schedule ON schedule.id = bureau_schedule.schedule_id
+        LEFT JOIN scores AS score
+          ON score.applicant_id = applicant.id
+         AND score.interviewer_id = ?
+        WHERE applicant.bureau_id = ?
+        GROUP BY applicant.id
+        ORDER BY schedule.start_at, applicant.id
+        ''', (interviewer_id, interviewer['bureau_id']),
+    ).fetchall()
+    return render_template(
+        'evaluations.html',
+        interviewer=interviewer,
+        applicants=applicants_for_evaluation,
+        message=request.args.get('message', ''),
+    )
 
-    try:
-        # 文字列型で渡された社員番号を整数型へ変換する
-        id_num = int(id)
-    except ValueError:
-        # 社員番号が整数型へ変換できない
-        return render_template('employee-edit-results.html',
-                               results='指定された社員番号には'
-                               '使えない文字があります')
-    # 社員の存在チェックと編集対象となる社員情報の取得：
-    # employees テーブルで同じ社員番号の行を 1 行だけ取り出す
-    employee = cur.execute('SELECT * FROM employees WHERE id = ?',
-                           (id_num,)).fetchone()
-    if employee is None:
-        # 指定された社員番号の行が無い
-        return render_template('employee-edit-results.html',
-                               results='指定された社員番号は存在しません')
 
-    # 編集対象の社員情報をテンプレートへ渡してレンダリングしたものを返す
-    return render_template('employee-edit.html', employee=employee)
-
-
-@app.route('/employee-edit/<id>', methods=['POST'])
-def employee_edit_update(id: str) -> Response:
-    """
-    社員編集更新.
-
-    `http://localhost:5000/employee-edit/<id>` への POST メソッドによる
-    リクエストがあった時に Flask が呼ぶ関数。
-    編集後の社員の情報が POST パラメータの
-    `name`, `salary`, `manager_id`, `birth_year`, `start_year`
-    に入っている（社員番号は編集できない）。
-
-    データベース接続を得て URL 中の `<id>` で指定された社員情報を取得し、
-    編集できるなら、POST パラメータの社員情報をチェック、
-    問題なければ社員情報を更新し、
-    テンプレート employee-edit-results.html
-    employee_edit_results へ処理結果コードを入れてリダイレクトする。
-    （PRG パターンの P を受けて R を返す）
-
-    Args:
-      id (str): 指定する社員番号
-    Returns:
-      Response: リダイレクト情報
-    """
-    # データベース接続してカーソルを得る
+@app.route(
+    '/interviewers/<interviewer_id>/applicants/<applicant_id>/scores',
+    methods=['GET', 'POST'],
+)
+def score_edit(interviewer_id: str, applicant_id: str):
+    """局の全評価項目を一つのトランザクションで保存する。"""
+    parsed_interviewer_id = parse_positive_int(interviewer_id)
+    parsed_applicant_id = parse_positive_int(applicant_id)
+    if parsed_interviewer_id is None or parsed_applicant_id is None:
+        return render_error('面接官または応募者IDが正しくありません。', 404)
     con = get_db()
-    cur = con.cursor()
-
-    try:
-        # 文字列型で渡された社員番号を整数型へ変換する
-        id_num = int(id)
-    except ValueError:
-        # 社員番号が整数型へ変換できない
-        return redirect(url_for('employee_edit_results',
-                                code='id-has-invalid-charactor'))
-    # 社員番号の存在チェックをする：
-    # employees テーブルで同じ社員番号の行を 1 行だけ取り出す
-    employee = cur.execute('SELECT id FROM employees WHERE id = ?',
-                           (id_num,)).fetchone()
-    if employee is None:
-        # 指定された社員番号の行が無い
-        return redirect(url_for('employee_edit_results',
-                                code='id-does-not-exist'))
-
-    # リクエストされた POST パラメータの内容を取り出す
-    name = request.form['name']
-    salary_str = request.form['salary']
-    manager_id_str = request.form['manager_id']
-    birth_year_str = request.form['birth_year']
-    start_year_str = request.form['start_year']
-
-    #
-    # 上司の社員番号チェック
-    #
-    try:
-        # 文字列型で渡された社員番号を整数型へ変換する
-        manager_id = int(manager_id_str)
-    except ValueError:
-        # 社員番号が整数型へ変換できない
-        return redirect(url_for('employee_edit_results',
-                                code='manager-id-has-invalid-charactor'))
-    if id_num != manager_id:
-        # 指定された社員番号と上司の社員番号が不一致
-        # →上司が別に存在する必要がある→上司の存在チェックをする：
-        # employees テーブルで指定された上司の社員番号を持つ社員
-        # の行を 1 行だけ取り出す
-        manager = cur.execute('SELECT id FROM employees WHERE id = ?',
-                              (manager_id,)).fetchone()
-        if manager is None:
-            # 指定された上司が存在しない
-            return redirect(url_for('employee_edit_results',
-                                    code='manager-id-does-not-exist'))
-
-    #
-    # 給与チェック
-    #
-    try:
-        # 文字列型で渡された給与を整数型へ変換する
-        salary = int(salary_str)
-    except ValueError:
-        # 給与が整数型へ変換できない
-        return redirect(url_for('employee_edit_results',
-                                code='salary-has-invalid-charactor'))
-
-    #
-    # 生年チェック
-    #
-    try:
-        # 文字列型で渡された生年を整数型へ変換する
-        birth_year = int(birth_year_str)
-    except ValueError:
-        # 生年が整数型へ変換できない
-        return redirect(url_for('employee_edit_results',
-                                code='birth-year-has-invalid-charactor'))
-
-    #
-    # 入社年チェック
-    #
-    try:
-        # 文字列型で渡された入社年を整数型へ変換する
-        start_year = int(start_year_str)
-    except ValueError:
-        # 入社年が整数型へ変換できない
-        return redirect(url_for('employee_edit_results',
-                                code='start-year-has-invalid-charactor'))
-
-    #
-    # 名前チェック
-    #
-    if has_control_character(name):
-        # 名前に制御文字が含まれる
-        return redirect(url_for('employee_edit_results',
-                                code='name-has-control-charactor'))
-
-    # データベースを更新
-    try:
-        # employees テーブルの指定された行のパラメータを更新
-        cur.execute('UPDATE employees '
-                    'SET name = ?, salary = ?, manager_id = ?, '
-                    'birth_year = ?, start_year = ? '
-                    'WHERE id = ?',
-                    (name, salary, manager_id, birth_year, start_year, id_num))
-    except sqlite3.Error:
-        # データベースエラーが発生
-        return redirect(url_for('employee_edit_results',
-                                code='database-error'))
-    # コミット（データベース更新処理を確定）
-    con.commit()
-
-    # 社員編集完了
-    return redirect(url_for('employee_edit_results',
-                            code='updated'))
+    context = con.execute(
+        '''
+        SELECT interviewer.id AS interviewer_id,
+               interviewer.name AS interviewer_name,
+               interviewer.bureau_id,
+               bureau.name AS bureau_name,
+               applicant.id AS applicant_id,
+               applicant.name AS applicant_name
+        FROM interviewers AS interviewer
+        JOIN bureaus AS bureau ON bureau.id = interviewer.bureau_id
+        JOIN applicants AS applicant
+          ON applicant.id = ?
+         AND applicant.bureau_id = interviewer.bureau_id
+         AND applicant.confirmed_bureau_schedule_id IS NOT NULL
+        WHERE interviewer.id = ?
+        ''', (parsed_applicant_id, parsed_interviewer_id),
+    ).fetchone()
+    if context is None:
+        return render_error(
+            '同じ局に所属し、面接が確定した応募者だけを評価できます。', 404,
+        )
+    criteria = con.execute(
+        '''
+        SELECT criterion.id, criterion.name, criterion.description,
+               score.score
+        FROM criteria AS criterion
+        LEFT JOIN scores AS score
+          ON score.criterion_id = criterion.id
+         AND score.applicant_id = ?
+         AND score.interviewer_id = ?
+        WHERE criterion.bureau_id = ?
+        ORDER BY criterion.id
+        ''',
+        (parsed_applicant_id, parsed_interviewer_id, context['bureau_id']),
+    ).fetchall()
+    errors: list[str] = []
+    entered_scores = {
+        criterion['id']: (str(criterion['score'])
+                          if criterion['score'] is not None else '')
+        for criterion in criteria
+    }
+    if request.method == 'POST':
+        score_values: list[tuple[int, int, int, int]] = []
+        for criterion in criteria:
+            raw_score = request.form.get(
+                f"score_{criterion['id']}", '').strip()
+            entered_scores[criterion['id']] = raw_score
+            score = parse_positive_int(raw_score)
+            if score is None or score > 10:
+                errors.append(
+                    f"{criterion['name']}は1〜10の整数で入力してください。"
+                )
+            else:
+                score_values.append((
+                    parsed_applicant_id, parsed_interviewer_id,
+                    criterion['id'], score,
+                ))
+        if not errors:
+            try:
+                con.execute('BEGIN')
+                con.executemany(
+                    '''
+                    INSERT INTO scores
+                        (applicant_id, interviewer_id, criterion_id, score)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT (applicant_id, interviewer_id, criterion_id)
+                    DO UPDATE SET score = excluded.score
+                    ''', score_values,
+                )
+                con.commit()
+            except sqlite3.IntegrityError:
+                con.rollback()
+                errors.append('局または評価項目の組み合わせが正しくありません。')
+            except sqlite3.Error:
+                con.rollback()
+                errors.append('データベースエラーのため評価を保存できませんでした。')
+            else:
+                return redirect(url_for(
+                    'interviewer_evaluations', id=parsed_interviewer_id,
+                    message='全評価項目を保存しました。',
+                ))
+    return render_template(
+        'score_form.html',
+        context=context,
+        criteria=criteria,
+        entered_scores=entered_scores,
+        errors=errors,
+    )
 
 
-@app.route('/employee-edit-results/<code>')
-def employee_edit_results(code: str) -> str:
-    """
-    社員編集結果ページ.
+def calculate_rankings(con: sqlite3.Connection, bureau_id: int):
+    """評価者×評価項目のz得点と応募者別T得点を計算する。"""
+    bureau = con.execute(
+        'SELECT id, name, capacity FROM bureaus WHERE id = ?', (bureau_id,)
+    ).fetchone()
+    if bureau is None:
+        return None, []
+    criterion_ids = {
+        row['id'] for row in con.execute(
+            'SELECT id FROM criteria WHERE bureau_id = ?', (bureau_id,)
+        ).fetchall()
+    }
+    applicant_rows = con.execute(
+        '''SELECT * FROM applicant_overview
+           WHERE bureau_id = ? ORDER BY applicant_id''', (bureau_id,)
+    ).fetchall()
+    score_rows = con.execute(
+        '''
+        SELECT score.applicant_id, score.interviewer_id,
+               score.criterion_id, score.score,
+               interviewer.name AS interviewer_name
+        FROM scores AS score
+        JOIN applicants AS applicant ON applicant.id = score.applicant_id
+        JOIN interviewers AS interviewer
+          ON interviewer.id = score.interviewer_id
+        WHERE applicant.bureau_id = ?
+        ORDER BY score.applicant_id, score.interviewer_id, score.criterion_id
+        ''', (bureau_id,),
+    ).fetchall()
+    statistic_rows = con.execute(
+        '''
+        SELECT score.interviewer_id, score.criterion_id,
+               COUNT(score.score) AS sample_count,
+               AVG(score.score) AS mean_score,
+               AVG(score.score * score.score) AS mean_square
+        FROM scores AS score
+        JOIN applicants AS applicant ON applicant.id = score.applicant_id
+        WHERE applicant.bureau_id = ?
+        GROUP BY score.interviewer_id, score.criterion_id
+        ''', (bureau_id,),
+    ).fetchall()
+    statistics = {
+        (row['interviewer_id'], row['criterion_id']): row
+        for row in statistic_rows
+    }
+    scores_by_applicant: dict[int, list[sqlite3.Row]] = {}
+    for row in score_rows:
+        scores_by_applicant.setdefault(row['applicant_id'], []).append(row)
 
-    `http://localhost:5000/employee-edit-result/<code>`
-    への GET メソッドによるリクエストがあった時に Flask が呼ぶ関数。
+    ranking_rows: list[dict[str, object]] = []
+    for applicant in applicant_rows:
+        applicant_scores = scores_by_applicant.get(
+            applicant['applicant_id'], [])
+        raw_average = (
+            sum(row['score']
+                for row in applicant_scores) / len(applicant_scores)
+            if applicant_scores else None
+        )
+        evaluator_criteria: dict[int, set[int]] = {}
+        for row in applicant_scores:
+            evaluator_criteria.setdefault(row['interviewer_id'], set()).add(
+                row['criterion_id'])
+        reasons: list[str] = []
+        if applicant['decision'] == 'withdrawn':
+            reasons.append('辞退')
+        if applicant['confirmed_bureau_schedule_id'] is None:
+            reasons.append('面接未確定')
+        if len(evaluator_criteria) < 2:
+            reasons.append('評価者不足')
+        if any(criteria_set != criterion_ids
+               for criteria_set in evaluator_criteria.values()):
+            reasons.append('評価項目不足')
 
-    PRG パターンで社員編集更新の POST 後にリダイレクトされてくる。
-    テンプレート employee-edit-results.html
-    へ処理結果コード code に基づいたメッセージを渡してレンダリングして返す。
+        t_scores: list[float] = []
+        if not reasons:
+            for row in applicant_scores:
+                statistic = statistics.get(
+                    (row['interviewer_id'], row['criterion_id']))
+                if statistic is None or statistic['sample_count'] < 2:
+                    reasons.append('補正用標本不足')
+                    break
+                mean = float(statistic['mean_score'])
+                variance = float(statistic['mean_square']) - mean * mean
+                variance = max(0.0, variance)
+                if variance <= 1e-12:
+                    z_score = 0.0
+                else:
+                    z_score = (row['score'] - mean) / (variance ** 0.5)
+                t_scores.append(50.0 + 10.0 * z_score)
 
-    Args:
-      code (str): 処理結果コード
-    Returns:
-      str: ページのコンテンツ
-    """
-    return render_template('employee-edit-results.html',
-                           results=RESULT_MESSAGES.get(code, 'code error'))
+        normalized_score = (
+            sum(t_scores) / len(t_scores) if t_scores and not reasons else None
+        )
+        ranking_rows.append({
+            'applicant': applicant,
+            'raw_average': raw_average,
+            'normalized_score': normalized_score,
+            'evaluator_count': len(evaluator_criteria),
+            'reasons': list(dict.fromkeys(reasons)),
+            'rank': None,
+            'candidate_status': 'incomplete',
+        })
+
+    complete_rows = [
+        row for row in ranking_rows if row['normalized_score'] is not None
+    ]
+    complete_rows.sort(key=lambda row: (
+        -float(row['normalized_score']),
+        row['applicant']['applicant_id'],
+    ))
+    for row in complete_rows:
+        score = float(row['normalized_score'])
+        higher_count = sum(
+            1 for other in complete_rows
+            if float(other['normalized_score']) > score + 1e-9
+        )
+        same_count = sum(
+            1 for other in complete_rows
+            if abs(float(other['normalized_score']) - score) <= 1e-9
+        )
+        start_position = higher_count + 1
+        end_position = higher_count + same_count
+        row['rank'] = start_position
+        if start_position <= bureau['capacity'] < end_position:
+            row['candidate_status'] = 'boundary_tie'
+        elif end_position <= bureau['capacity']:
+            row['candidate_status'] = 'candidate'
+        else:
+            row['candidate_status'] = 'outside'
+
+    incomplete_rows = [
+        row for row in ranking_rows if row['normalized_score'] is None
+    ]
+    incomplete_rows.sort(key=lambda row: row['applicant']['applicant_id'])
+    return bureau, complete_rows + incomplete_rows
+
+
+@app.route('/rankings')
+def rankings() -> str:
+    """局別の補正前平均と補正後ランキングを表示する。"""
+    bureau_id = parse_positive_int(request.args.get('bureau_id')) or 1
+    bureau, rows = calculate_rankings(get_db(), bureau_id)
+    if bureau is None:
+        return render_error('指定された局は存在しません。', 404)
+    return render_template(
+        'rankings.html',
+        bureaus=get_bureaus(),
+        bureau=bureau,
+        rows=rows,
+        decision_labels=DECISION_LABELS,
+        message=request.args.get('message', ''),
+    )
+
+
+@app.errorhandler(404)
+def not_found(error):
+    """存在しないURLに利用者向けページを返す。"""
+    return render_template('error.html', message='ページが見つかりません。'), 404
+
+
+@app.errorhandler(413)
+def request_too_large(error):
+    """大きすぎるリクエストを拒否する。"""
+    return render_template(
+        'error.html', message='送信されたデータが大きすぎます。'
+    ), 413
 
 
 if __name__ == '__main__':
-    # このスクリプトを直接実行したらデバッグ用 Web サーバで起動する
     app.run(debug=True)

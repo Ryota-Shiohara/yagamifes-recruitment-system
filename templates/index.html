@@ -1,13 +1,32 @@
-<html lang="ja">
-  <head>
-    <meta charset="UTF-8">
-    <title>入口のページ</title>
-  </head>
-  <body>
-    <h1>入口のページ</h1>
-    <p>
-      <a href="{{url_for('employees')}}">社員一覧</a><br>
-      <a href="{{url_for('employee_add')}}">社員追加</a>
-    </p>
-  </body>
-</html>
+{% extends "base.html" %}
+{% block title %}入口 | 新規局員採用システム{% endblock %}
+{% block content %}
+  <section class="hero">
+    <div>
+      <p class="eyebrow">DATABASE APPLICATION</p>
+      <h1>応募から採否までを、<br>一つのデータモデルで。</h1>
+      <p class="lead">応募者の希望面接枠、面接日程、評価、補正後ランキングをSQLiteで一貫して管理します。</p>
+      <div class="button-row">
+        <a class="button primary" href="{{ url_for('applicant_new') }}">応募情報を登録</a>
+        <a class="button secondary" href="{{ url_for('applicants') }}">選考状況を見る</a>
+      </div>
+    </div>
+    <div class="hero-panel" aria-label="登録状況">
+      <div class="metric"><strong>{{ stats.applicant_count }}</strong><span>応募者</span></div>
+      <div class="metric"><strong>{{ stats.confirmed_count }}</strong><span>面接確定</span></div>
+      <div class="metric"><strong>{{ stats.score_count }}</strong><span>評価レコード</span></div>
+    </div>
+  </section>
+  <section class="section-block">
+    <div class="section-heading">
+      <p class="eyebrow">ROLE MENUS</p>
+      <h2>役割から操作を選ぶ</h2>
+      <p>この課題では認証を行わず、役割別に操作入口を分けています。</p>
+    </div>
+    <div class="card-grid three">
+      <article class="feature-card"><span class="card-number">01</span><h3>応募者</h3><p>希望局と複数の面接可能枠をまとめて登録します。</p><a href="{{ url_for('applicant_new') }}">応募登録へ →</a></article>
+      <article class="feature-card"><span class="card-number">02</span><h3>面接官</h3><p>同じ局の面接確定済み応募者を、評価項目ごとに採点します。</p><a href="{{ url_for('interviewers') }}">評価入力へ →</a></article>
+      <article class="feature-card"><span class="card-number">03</span><h3>局責任者</h3><p>面接割り当て、補正ランキング、採否決定を管理します。</p><a href="{{ url_for('applicants') }}">応募者管理へ →</a></article>
+    </div>
+  </section>
+{% endblock %}
