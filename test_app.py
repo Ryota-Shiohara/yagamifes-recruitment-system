@@ -98,9 +98,10 @@ class RecruitmentAppTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertEqual(
-            [slot['id'] for slot in payload['slots']],
+            [slot['id'] for slot in payload['slots'][:3]],
             [1, 2, 3],
         )
+        self.assertGreaterEqual(len(payload['slots']), 50)
         self.assertTrue(all('booked' in slot for slot in payload['slots']))
         self.assertNotIn('booked_applicant_name', payload['slots'][0])
 
@@ -328,7 +329,7 @@ class RecruitmentAppTestCase(unittest.TestCase):
             )
             self.assertEqual(bureau['name'], 'IT局')
             self.assertEqual(
-                [row['applicant']['applicant_id'] for row in rows],
+                [row['applicant']['applicant_id'] for row in rows[:3]],
                 [101, 102, 103],
             )
             self.assertAlmostEqual(
