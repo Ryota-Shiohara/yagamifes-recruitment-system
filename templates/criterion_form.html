@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}採用基準を編集 | 新規局員採用システム{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><p class="eyebrow">CRITERIA EDIT</p><h1>採用基準を編集</h1><p>{{ bureau.name }}の評価基準を更新します。</p></div></div>
+  {% if errors %}<div class="notice error"><strong>入力内容を確認してください。</strong><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div>{% endif %}
+  <form class="panel stack narrow" method="post">
+    <input type="hidden" name="bureau_id" value="{{ bureau_id }}">
+    <div class="field"><label for="name">基準名</label><input id="name" name="name" maxlength="80" required value="{{ form.name }}"></div>
+    <div class="field"><label for="description">説明</label><textarea id="description" name="description" maxlength="500" required>{{ form.description }}</textarea><span class="help">面接官の評価画面に表示されます。500文字以内。</span></div>
+    {% if criterion.score_count %}<p class="notice warning">この基準には既に{{ criterion.score_count }}件の評価があります。変更後の名称・説明は既存の評価表示にも適用されます。</p>{% endif %}
+    <div class="button-row"><button class="primary" type="submit">更新する</button><a class="button secondary" href="{{ url_for('criteria_manage', bureau_id=bureau_id) }}">戻る</a></div>
+  </form>
+{% endblock %}

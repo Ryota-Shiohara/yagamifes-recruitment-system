@@ -24,6 +24,8 @@ DATABASE = 'database.db'
 MAX_NAME_LENGTH: Final[int] = 80
 MAX_EMAIL_LENGTH: Final[int] = 254
 MAX_REMARK_LENGTH: Final[int] = 500
+MAX_CRITERION_NAME_LENGTH: Final[int] = 80
+MAX_CRITERION_DESCRIPTION_LENGTH: Final[int] = 500
 DECISION_LABELS: Final[dict[Optional[str], str]] = {
     None: '未決定',
     'accepted': '採用',
@@ -311,6 +313,41 @@ def validate_applicant_form(
             errors.append('希望局に属さない面接枠が含まれています。')
 
     return errors, availability_ids
+
+
+def validate_criterion_form(
+        name: str, description: str, bureau_id: Optional[int],
+) -> list[str]:
+    """採用基準フォームを検証する。"""
+    errors: list[str] = []
+    if not name:
+        errors.append('基準名は必須です。')
+    elif len(name) > MAX_CRITERION_NAME_LENGTH:
+        errors.append(
+            f'基準名は{MAX_CRITERION_NAME_LENGTH}文字以内で入力してください。',
+        )
+    elif has_control_character(name):
+        errors.append('基準名に制御文字は使用できません。')
+
+    if not description:
+        errors.append('説明は必須です。')
+    elif len(description) > MAX_CRITERION_DESCRIPTION_LENGTH:
+        errors.append(
+            '説明は'
+            f'{MAX_CRITERION_DESCRIPTION_LENGTH}文字以内で入力してください。',
+        )
+    elif has_control_character(description):
+        errors.append('説明に制御文字は使用できません。')
+
+    if bureau_id is None:
+        errors.append('局を選択してください。')
+    else:
+        bureau = get_db().execute(
+            'SELECT id FROM bureaus WHERE id = ?', (bureau_id,),
+        ).fetchone()
+        if bureau is None:
+            errors.append('指定された局は存在しません。')
+    return errors
 
 
 @app.route('/')
@@ -742,6 +779,151 @@ def applicant_decision(id: str) -> Response:
         'applicant_detail', id=applicant_id,
         message='採否を更新しました。',
     ))
+
+
+@app.route('/manager/criteria', methods=['GET', 'POST'])
+@role_required('bureau_manager')
+def criteria_manage():
+    """局責任者が自局の採用基準を一覧・作成する。"""
+    con = get_db()
+    bureaus = get_bureaus()
+    raw_bureau_id = (
+        request.form.get('bureau_id') if request.method == 'POST'
+        else request.args.get('bureau_id')
+    )
+    bureau_id = parse_positive_int(raw_bureau_id) or 1
+    name = request.form.get('name', '').strip() if request.method == 'POST' else ''
+    description = (
+        request.form.get('description', '').strip()
+        if request.method == 'POST' else ''
+    )
+    errors: list[str] = []
+    message = request.args.get('message', '')
+
+    if request.method == 'POST':
+        errors = validate_criterion_form(name, description, bureau_id)
+        if not errors:
+            try:
+                con.execute(
+                    '''INSERT INTO criteria (bureau_id, name, description)
+                       VALUES (?, ?, ?)''',
+                    (bureau_id, name, description),
+                )
+                con.commit()
+            except sqlite3.IntegrityError:
+                con.rollback()
+                errors.append('同じ局に同名の採用基準は作成できません。')
+            except sqlite3.Error:
+                con.rollback()
+                errors.append('データベースエラーのため作成できませんでした。')
+            else:
+                return redirect(url_for(
+                    'criteria_manage', bureau_id=bureau_id,
+                    message='採用基準を作成しました。',
+                ))
+
+    criteria_rows = con.execute(
+        '''
+        SELECT criterion.id, criterion.bureau_id, criterion.name,
+               criterion.description, COUNT(score.applicant_id) AS score_count
+        FROM criteria AS criterion
+        LEFT JOIN scores AS score ON score.criterion_id = criterion.id
+        WHERE criterion.bureau_id = ?
+        GROUP BY criterion.id
+        ORDER BY criterion.id
+        ''',
+        (bureau_id,),
+    ).fetchall()
+    selected_bureau = next(
+        (bureau for bureau in bureaus if bureau['id'] == bureau_id), None,
+    )
+    return render_template(
+        'criteria.html',
+        bureaus=bureaus,
+        selected_bureau=selected_bureau,
+        selected_bureau_id=bureau_id,
+        criteria=criteria_rows,
+        form={'name': name, 'description': description},
+        errors=errors,
+        message=message,
+    )
+
+
+@app.route('/manager/criteria/<id>/edit', methods=['GET', 'POST'])
+@role_required('bureau_manager')
+def criterion_edit(id: str):
+    """局責任者が自局の採用基準を編集する。"""
+    criterion_id = parse_positive_int(id)
+    if criterion_id is None:
+        return render_error('採用基準IDが正しくありません。', 404)
+
+    con = get_db()
+    criterion = con.execute(
+        '''
+        SELECT criterion.id, criterion.bureau_id, criterion.name,
+               criterion.description, COUNT(score.applicant_id) AS score_count
+        FROM criteria AS criterion
+        LEFT JOIN scores AS score ON score.criterion_id = criterion.id
+        WHERE criterion.id = ?
+        GROUP BY criterion.id
+        ''',
+        (criterion_id,),
+    ).fetchone()
+    if criterion is None:
+        return render_error('指定された採用基準は存在しません。', 404)
+
+    raw_bureau_id = (
+        request.form.get('bureau_id') if request.method == 'POST'
+        else request.args.get('bureau_id')
+    )
+    requested_bureau_id = parse_positive_int(raw_bureau_id)
+    if raw_bureau_id and requested_bureau_id is None:
+        return render_error('局の指定が正しくありません。', 400)
+    bureau_id = requested_bureau_id or criterion['bureau_id']
+    if bureau_id != criterion['bureau_id']:
+        return render_error('自局の採用基準だけを編集できます。', 404)
+
+    name = criterion['name']
+    description = criterion['description']
+    errors: list[str] = []
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        description = request.form.get('description', '').strip()
+        errors = validate_criterion_form(name, description, bureau_id)
+        if not errors:
+            try:
+                cursor = con.execute(
+                    '''UPDATE criteria
+                       SET name = ?, description = ?
+                       WHERE id = ? AND bureau_id = ?''',
+                    (name, description, criterion_id, bureau_id),
+                )
+                con.commit()
+            except sqlite3.IntegrityError:
+                con.rollback()
+                errors.append('同じ局に同名の採用基準は設定できません。')
+            except sqlite3.Error:
+                con.rollback()
+                errors.append('データベースエラーのため更新できませんでした。')
+            else:
+                if cursor.rowcount == 0:
+                    return render_error('指定された採用基準は存在しません。', 404)
+                return redirect(url_for(
+                    'criteria_manage', bureau_id=bureau_id,
+                    message='採用基準を更新しました。',
+                ))
+
+    bureau = con.execute(
+        'SELECT id, name FROM bureaus WHERE id = ?', (bureau_id,),
+    ).fetchone()
+    return render_template(
+        'criterion_form.html',
+        criterion=criterion,
+        bureau=bureau,
+        bureau_id=bureau_id,
+        form={'name': name, 'description': description},
+        errors=errors,
+    )
 
 
 @app.route('/manager/bureau-schedules', methods=['GET', 'POST'])

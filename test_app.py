@@ -139,6 +139,53 @@ class RecruitmentAppTestCase(unittest.TestCase):
         connection.close()
         self.assertEqual(created_count, 1)
 
+    def test_manager_can_create_and_edit_criteria_for_selected_bureau(self) -> None:
+        self.client.get('/role/bureau_manager')
+        response = self.client.get('/manager/criteria?bureau_id=2')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('発信力・企画力', response.get_data(as_text=True))
+
+        response = self.client.post('/manager/criteria', data={
+            'bureau_id': '2',
+            'name': '新しい採用基準',
+            'description': '新しい基準の説明',
+        })
+        self.assertEqual(response.status_code, 302)
+        connection = self.connect()
+        criterion = connection.execute(
+            '''SELECT id, bureau_id, name, description FROM criteria
+               WHERE bureau_id = 2 AND name = ?''',
+            ('新しい採用基準',),
+        ).fetchone()
+        connection.close()
+        self.assertIsNotNone(criterion)
+        self.assertEqual(criterion['bureau_id'], 2)
+
+        response = self.client.post(
+            f"/manager/criteria/{criterion['id']}/edit",
+            data={
+                'bureau_id': '2',
+                'name': '更新した採用基準',
+                'description': '更新した説明',
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        connection = self.connect()
+        updated = connection.execute(
+            'SELECT name, description FROM criteria WHERE id = ?',
+            (criterion['id'],),
+        ).fetchone()
+        connection.close()
+        self.assertEqual(
+            (updated['name'], updated['description']),
+            ('更新した採用基準', '更新した説明'),
+        )
+
+        response = self.client.get(
+            f"/manager/criteria/{criterion['id']}/edit?bureau_id=1",
+        )
+        self.assertEqual(response.status_code, 404)
+
     def test_applicant_and_availabilities_are_inserted_together(self) -> None:
         response = self.client.post('/applicants/new', data={
             'name': '新規 応募者',

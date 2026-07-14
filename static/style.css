@@ -66,6 +66,7 @@ h3 { font-size: 20px; }
 .section-heading p:last-child, .feature-card p { color: var(--muted); }
 .card-grid { display: grid; gap: 18px; }
 .card-grid.three { grid-template-columns: repeat(3, 1fr); }
+.card-grid.four { grid-template-columns: repeat(4, 1fr); }
 .feature-card, .panel { padding: 28px; background: var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); }
 .feature-card a { font-weight: 700; text-decoration: none; }
 .card-number { color: var(--gold); font: 28px Georgia, serif; }
@@ -150,7 +151,7 @@ tbody tr:hover { background: #fbfcfa; }
 fieldset { min-width: 0; margin: 0; border: 0; padding: 0; }
 @media (max-width: 840px) {
   .site-header, .page-heading { align-items: flex-start; flex-direction: column; }
-  .hero, .card-grid.three, .detail-grid, .form-grid, .assignment-board-grid { grid-template-columns: 1fr; }
+  .hero, .card-grid.three, .card-grid.four, .detail-grid, .form-grid, .assignment-board-grid { grid-template-columns: 1fr; }
   .field.full { grid-column: auto; }
   .checkbox-list { grid-template-columns: 1fr; }
   .page-shell { width: min(100% - 24px, 1180px); padding-top: 34px; }

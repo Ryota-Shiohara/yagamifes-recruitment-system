@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}採用基準管理 | 新規局員採用システム{% endblock %}
+{% block content %}
+  <div class="page-heading">
+    <div><p class="eyebrow">CRITERIA</p><h1>採用基準管理</h1><p>{% if selected_bureau %}{{ selected_bureau.name }}{% endif %}の面接評価項目を作成・編集します。</p></div>
+  </div>
+  {% if message %}<p class="notice success">{{ message }}</p>{% endif %}
+  {% if errors %}<div class="notice error"><strong>入力内容を確認してください。</strong><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div>{% endif %}
+
+  <form class="toolbar panel" method="get">
+    <div class="field compact"><label for="bureau_filter">対象局</label><select id="bureau_filter" name="bureau_id">{% for bureau in bureaus %}<option value="{{ bureau.id }}" {% if bureau.id == selected_bureau_id %}selected{% endif %}>{{ bureau.name }}</option>{% endfor %}</select></div>
+    <button class="secondary" type="submit">表示</button>
+  </form>
+
+  <div class="detail-grid">
+    <section class="panel">
+      <div class="section-heading"><p class="eyebrow">CURRENT CRITERIA</p><h2>登録済みの採用基準</h2><p>面接官の評価入力には、ここで登録した基準が表示されます。</p></div>
+      <div class="table-wrap"><table><thead><tr><th>基準名</th><th>説明</th><th>評価数</th><th></th></tr></thead><tbody>
+        {% for criterion in criteria %}
+          <tr><td><strong>{{ criterion.name }}</strong></td><td>{{ criterion.description }}</td><td>{{ criterion.score_count }}件</td><td><a class="button secondary small" href="{{ url_for('criterion_edit', id=criterion.id, bureau_id=selected_bureau_id) }}">編集</a></td></tr>
+        {% else %}<tr><td class="empty" colspan="4">この局の採用基準はまだありません。</td></tr>{% endfor %}
+      </tbody></table></div>
+    </section>
+
+    <section class="panel stack">
+      <div><p class="eyebrow">CREATE</p><h2>採用基準を追加</h2><p class="help">基準名は局内で重複できません。説明は面接官の評価画面に表示されます。</p></div>
+      <form class="stack" method="post">
+        <input type="hidden" name="bureau_id" value="{{ selected_bureau_id }}">
+        <div class="field"><label for="name">基準名</label><input id="name" name="name" maxlength="80" required value="{{ form.name }}"></div>
+        <div class="field"><label for="description">説明</label><textarea id="description" name="description" maxlength="500" required>{{ form.description }}</textarea><span class="help">500文字以内。</span></div>
+        <button class="primary" type="submit">作成する</button>
+      </form>
+    </section>
+  </div>
+{% endblock %}

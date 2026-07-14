@@ -92,6 +92,7 @@ COUNT(score)、AVG(score)、AVG(score * score) はSQLで集約します。平方
 | 応募情報編集 | UPDATE、希望枠の INSERT / DELETE、トランザクション |
 | 面接割り当てボード | 応募者・希望枠・予約状況の SELECT、確定枠の UPDATE、UNIQUE、希望枠存在確認 |
 | 局別面接枠 | schedules / bureau_schedules の INSERT、UPDATE / DELETE、重複時間検証 |
+| 採用基準管理 | criteria の局別 SELECT、INSERT、UPDATE、局内一意制約 |
 | 評価入力 | 複合主キー、UPSERT、全項目トランザクション |
 | ランキング | AVG、COUNT、GROUP BY、複数表 JOIN、z得点 |
 | 採否決定 | UPDATE applicants.decision |
