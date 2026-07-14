@@ -19,7 +19,7 @@
           <input value="{% for bureau in bureaus %}{% if bureau.id|string == form.bureau_id|string %}{{ bureau.name }}{% endif %}{% endfor %}" disabled>
           <span class="help">登録後に希望局は変更できません。</span>
         {% else %}
-          <select id="bureau_id" name="bureau_id" required onchange="if (this.value) window.location.href='{{ url_for('applicant_new') }}?bureau_id=' + this.value">
+          <select id="bureau_id" name="bureau_id" required data-slots-url="{{ url_for('applicant_slots') }}">
             <option value="">選択してください</option>
             {% for bureau in bureaus %}<option value="{{ bureau.id }}" {% if bureau.id|string == form.bureau_id|string %}selected{% endif %}>{{ bureau.name }}</option>{% endfor %}
           </select>
@@ -29,20 +29,23 @@
       <div class="field full"><label for="remark">備考</label><textarea id="remark" name="remark" maxlength="500">{{ form.remark }}</textarea><span class="help">500文字以内。任意項目です。</span></div>
       <fieldset class="field full">
         <legend>面接可能枠（複数選択）</legend>
-        {% if slots %}
-          <div class="checkbox-list">
-            {% for slot in slots %}
-              <label class="checkbox-card">
-                <input type="checkbox" name="availability_ids" value="{{ slot.id }}" {% if slot.id in selected_ids %}checked{% endif %} {% if slot.booked_applicant_id %}disabled{% endif %}>
-                <span>{{ slot.start_at }}〜{{ slot.end_at[11:] }}{% if slot.booked_applicant_id %}<br><small>予約済み</small>{% endif %}</span>
-              </label>
-            {% endfor %}
-          </div>
-        {% else %}
-          <p class="empty">希望局を選択すると面接枠が表示されます。</p>
-        {% endif %}
+        <div data-availability-list>
+          {% if slots %}
+            <div class="checkbox-list">
+              {% for slot in slots %}
+                <label class="checkbox-card">
+                  <input type="checkbox" name="availability_ids" value="{{ slot.id }}" {% if slot.id in selected_ids %}checked{% endif %} {% if slot.booked_applicant_id %}disabled{% endif %}>
+                  <span>{{ slot.start_at }}〜{{ slot.end_at[11:] }}{% if slot.booked_applicant_id %}<br><small>予約済み</small>{% endif %}</span>
+                </label>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="empty">希望局を選択すると面接枠が表示されます。</p>
+          {% endif %}
+        </div>
       </fieldset>
     </div>
     <div class="button-row"><button class="primary" type="submit">{{ action_label }}</button><a class="button secondary" href="{{ url_for('index') }}">キャンセル</a></div>
   </form>
+  {% if not bureau_locked %}<script defer src="{{ url_for('static', filename='applicant_form.js') }}"></script>{% endif %}
 {% endblock %}

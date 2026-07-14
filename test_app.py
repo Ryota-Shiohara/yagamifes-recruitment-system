@@ -85,6 +85,28 @@ class RecruitmentAppTestCase(unittest.TestCase):
         self.assertNotIn('応募者一覧', page_text(interviewer_home))
         self.assertEqual(self.client.get('/manager/rankings').status_code, 302)
 
+    def test_applicant_slot_loading_keeps_form_fields_on_bureau_change(self) -> None:
+        self.client.get('/role/applicant')
+
+        response = self.client.get('/applicant/applications/new?bureau_id=1')
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn('data-slots-url="/applicant/slots"', page)
+        self.assertNotIn('window.location.href', page)
+
+        response = self.client.get('/applicant/slots?bureau_id=1')
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(
+            [slot['id'] for slot in payload['slots']],
+            [1, 2, 3],
+        )
+        self.assertTrue(all('booked' in slot for slot in payload['slots']))
+        self.assertNotIn('booked_applicant_name', payload['slots'][0])
+
+        response = self.client.get('/applicant/slots?bureau_id=999')
+        self.assertEqual(response.status_code, 404)
+
     def test_assignment_board_updates_schedule_and_creates_custom_slot(self) -> None:
         self.client.get('/role/bureau_manager')
         board = self.client.get('/manager/bureau-schedules?bureau_id=1')

@@ -465,6 +465,29 @@ def applicant_new():
     )
 
 
+@app.route('/applicant/slots')
+@role_required('applicant')
+def applicant_slots():
+    """応募登録フォーム用に、選択局の面接枠だけをJSONで返す。"""
+    bureau_id = parse_positive_int(request.args.get('bureau_id'))
+    if bureau_id is None:
+        return jsonify(error='局の指定が正しくありません。'), 400
+    bureau = get_db().execute(
+        'SELECT id FROM bureaus WHERE id = ?', (bureau_id,),
+    ).fetchone()
+    if bureau is None:
+        return jsonify(error='指定された局は存在しません。'), 404
+    return jsonify(slots=[
+        {
+            'id': slot['id'],
+            'start_at': slot['start_at'],
+            'end_at': slot['end_at'],
+            'booked': slot['booked_applicant_id'] is not None,
+        }
+        for slot in get_slots_for_bureau(bureau_id)
+    ])
+
+
 @app.route('/manager/applicants')
 @role_required('bureau_manager')
 def applicants() -> str:
