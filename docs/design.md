@@ -90,8 +90,8 @@ COUNT(score)、AVG(score)、AVG(score * score) はSQLで集約します。平方
 | 応募者一覧 | applicant_overview、可変 WHERE、パラメータ化 |
 | 応募者詳細 | 複数表 JOIN、評価件数 COUNT |
 | 応募情報編集 | UPDATE、希望枠の INSERT / DELETE、トランザクション |
-| 面接確定 | UPDATE、UNIQUE、希望枠存在確認 |
-| 局別面接枠 | INSERT / UPDATE / DELETE、重複時間検証 |
+| 面接割り当てボード | 応募者・希望枠・予約状況の SELECT、確定枠の UPDATE、UNIQUE、希望枠存在確認 |
+| 局別面接枠 | schedules / bureau_schedules の INSERT、UPDATE / DELETE、重複時間検証 |
 | 評価入力 | 複合主キー、UPSERT、全項目トランザクション |
 | ランキング | AVG、COUNT、GROUP BY、複数表 JOIN、z得点 |
 | 採否決定 | UPDATE applicants.decision |

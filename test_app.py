@@ -85,6 +85,60 @@ class RecruitmentAppTestCase(unittest.TestCase):
         self.assertNotIn('応募者一覧', page_text(interviewer_home))
         self.assertEqual(self.client.get('/manager/rankings').status_code, 302)
 
+    def test_assignment_board_updates_schedule_and_creates_custom_slot(self) -> None:
+        self.client.get('/role/bureau_manager')
+        board = self.client.get('/manager/bureau-schedules?bureau_id=1')
+        self.assertEqual(board.status_code, 200)
+        self.assertIn('面接割り当てボード', board.get_data(as_text=True))
+
+        response = self.client.post('/manager/assignments', data={
+            'applicant_id': '202',
+            'bureau_schedule_id': '1',
+        })
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.get_json()['success'])
+
+        response = self.client.post('/manager/assignments', data={
+            'applicant_id': '202',
+            'bureau_schedule_id': '5',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()['success'])
+        connection = self.connect()
+        confirmed = connection.execute(
+            '''SELECT confirmed_bureau_schedule_id FROM applicants
+               WHERE id = 202''',
+        ).fetchone()[0]
+        connection.close()
+        self.assertEqual(confirmed, 5)
+
+        response = self.client.post('/manager/assignments', data={
+            'applicant_id': '202',
+            'bureau_schedule_id': '',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()['success'])
+
+        response = self.client.post('/manager/bureau-schedules', data={
+            'bureau_id': '2',
+            'schedule_id': '',
+            'start_at': '2026-07-13T12:00',
+            'end_at': '2026-07-13T12:30',
+        })
+        self.assertEqual(response.status_code, 302)
+        connection = self.connect()
+        created_count = connection.execute(
+            '''SELECT COUNT(*)
+               FROM bureau_schedules AS bureau_schedule
+               JOIN schedules AS schedule
+                 ON schedule.id = bureau_schedule.schedule_id
+               WHERE bureau_schedule.bureau_id = 2
+                 AND schedule.start_at = '2026-07-13 12:00:00'
+                 AND schedule.end_at = '2026-07-13 12:30:00' ''',
+        ).fetchone()[0]
+        connection.close()
+        self.assertEqual(created_count, 1)
+
     def test_applicant_and_availabilities_are_inserted_together(self) -> None:
         response = self.client.post('/applicants/new', data={
             'name': '新規 応募者',

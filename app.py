@@ -2,11 +2,21 @@
 """矢上祭実行委員会の新規局員採用を題材にしたDB Webアプリ。"""
 
 import sqlite3
+from datetime import datetime
 from functools import wraps
 from typing import Final, Optional
 import unicodedata
 
-from flask import Flask, g, redirect, render_template, request, session, url_for
+from flask import (
+    Flask,
+    g,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
 from werkzeug import Response
 
 
@@ -161,6 +171,75 @@ def get_slots_for_bureau(bureau_id: int) -> list[sqlite3.Row]:
         ''',
         (bureau_id,),
     ).fetchall()
+
+
+def get_assignment_board(bureau_id: int) -> dict[str, list[object]]:
+    """指定局の応募者と面接枠を、割り当てボード用にまとめる。"""
+    con = get_db()
+    applicant_rows = con.execute(
+        '''
+        SELECT
+            applicant.id,
+            applicant.name,
+            applicant.email,
+            applicant.confirmed_bureau_schedule_id,
+            applicant.decision,
+            COALESCE(GROUP_CONCAT(availability.bureau_schedule_id), '')
+                AS availability_ids,
+            EXISTS(
+                SELECT 1 FROM scores
+                WHERE scores.applicant_id = applicant.id
+            ) AS has_scores
+        FROM applicants AS applicant
+        LEFT JOIN applicant_availabilities AS availability
+          ON availability.applicant_id = applicant.id
+        WHERE applicant.bureau_id = ?
+        GROUP BY applicant.id
+        ORDER BY applicant.id
+        ''',
+        (bureau_id,),
+    ).fetchall()
+
+    applicants: list[dict[str, object]] = []
+    for row in applicant_rows:
+        applicant = dict(row)
+        applicant['availability_ids'] = [
+            int(value) for value in row['availability_ids'].split(',')
+            if value
+        ]
+        applicant['has_scores'] = bool(row['has_scores'])
+        applicants.append(applicant)
+
+    applicant_by_slot = {
+        applicant['confirmed_bureau_schedule_id']: applicant
+        for applicant in applicants
+        if applicant['confirmed_bureau_schedule_id'] is not None
+    }
+    slots: list[dict[str, object]] = []
+    for row in get_slots_for_bureau(bureau_id):
+        slot = dict(row)
+        slot['applicant'] = applicant_by_slot.get(slot['id'])
+        slots.append(slot)
+
+    return {
+        'unassigned': [
+            applicant for applicant in applicants
+            if applicant['confirmed_bureau_schedule_id'] is None
+        ],
+        'slots': slots,
+    }
+
+
+def normalize_schedule_datetime(value: Optional[str]) -> Optional[str]:
+    """datetime-local等の入力をDB保存形式へ変換する。"""
+    raw_value = (value or '').strip()
+    if not raw_value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw_value)
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=None).strftime('%Y-%m-%d %H:%M:%S')
 
 
 def escape_like(value: str) -> str:
@@ -545,6 +624,52 @@ def applicant_edit(id: str):
     )
 
 
+def update_applicant_schedule(
+        applicant_id: int, slot_id: Optional[int],
+) -> tuple[bool, str]:
+    """応募者の確定面接枠を検証付きで更新する。"""
+    con = get_db()
+    applicant = con.execute(
+        'SELECT id, bureau_id FROM applicants WHERE id = ?',
+        (applicant_id,),
+    ).fetchone()
+    if applicant is None:
+        return False, '指定された応募者は存在しません。'
+
+    if slot_id is not None:
+        slot = con.execute(
+            'SELECT bureau_id FROM bureau_schedules WHERE id = ?',
+            (slot_id,),
+        ).fetchone()
+        if slot is None:
+            return False, '指定された面接枠は存在しません。'
+        if slot['bureau_id'] != applicant['bureau_id']:
+            return False, '応募者と面接枠の局が一致していません。'
+        availability = con.execute(
+            '''SELECT 1 FROM applicant_availabilities
+               WHERE applicant_id = ? AND bureau_schedule_id = ?''',
+            (applicant_id, slot_id),
+        ).fetchone()
+        if availability is None:
+            return False, '応募者が希望していない面接枠は確定できません。'
+
+    try:
+        con.execute(
+            '''UPDATE applicants SET confirmed_bureau_schedule_id = ?
+               WHERE id = ?''', (slot_id, applicant_id),
+        )
+        con.commit()
+    except sqlite3.IntegrityError as exception:
+        con.rollback()
+        if 'locked after scoring' in str(exception):
+            return False, '評価入力後は確定面接枠を変更できません。'
+        return False, 'その面接枠は既に予約されているか、選択できません。'
+    except sqlite3.Error:
+        con.rollback()
+        return False, 'データベースエラーのため面接枠を更新できませんでした。'
+    return True, '確定面接枠を更新しました。'
+
+
 @app.route('/manager/applicants/<id>/schedule', methods=['POST'])
 @role_required('bureau_manager')
 def applicant_schedule(id: str) -> Response:
@@ -560,43 +685,34 @@ def applicant_schedule(id: str) -> Response:
             error='面接枠の指定が正しくありません。',
         ))
 
-    con = get_db()
-    applicant = con.execute(
-        'SELECT id FROM applicants WHERE id = ?', (applicant_id,)
-    ).fetchone()
-    if applicant is None:
-        return redirect(url_for('applicants'))
-    if slot_id is not None:
-        availability = con.execute(
-            '''SELECT 1 FROM applicant_availabilities
-               WHERE applicant_id = ? AND bureau_schedule_id = ?''',
-            (applicant_id, slot_id),
-        ).fetchone()
-        if availability is None:
-            return redirect(url_for(
-                'applicant_detail', id=applicant_id,
-                error='応募者が希望していない面接枠は確定できません。',
-            ))
-    try:
-        con.execute(
-            '''UPDATE applicants SET confirmed_bureau_schedule_id = ?
-               WHERE id = ?''', (slot_id, applicant_id),
-        )
-        con.commit()
-    except sqlite3.IntegrityError as exception:
-        con.rollback()
-        if 'locked after scoring' in str(exception):
-            error = '評価入力後は確定面接枠を変更できません。'
-        else:
-            error = 'その面接枠は既に予約されているか、選択できません。'
+    success, message = update_applicant_schedule(applicant_id, slot_id)
+    if not success:
+        if message == '指定された応募者は存在しません。':
+            return redirect(url_for('applicants'))
         return redirect(url_for(
-            'applicant_detail', id=applicant_id,
-            error=error,
+            'applicant_detail', id=applicant_id, error=message,
         ))
     return redirect(url_for(
-        'applicant_detail', id=applicant_id,
-        message='確定面接枠を更新しました。',
+        'applicant_detail', id=applicant_id, message=message,
     ))
+
+
+@app.route('/manager/assignments', methods=['POST'])
+@role_required('bureau_manager')
+def manager_assignment():
+    """割り当てボードからの面接枠変更をJSONで受け付ける。"""
+    applicant_id = parse_positive_int(request.form.get('applicant_id'))
+    raw_slot_id = request.form.get('bureau_schedule_id', '')
+    slot_id = None if raw_slot_id == '' else parse_positive_int(raw_slot_id)
+    if applicant_id is None or (raw_slot_id != '' and slot_id is None):
+        return jsonify(
+            success=False, error='応募者または面接枠の指定が正しくありません。',
+        ), 400
+
+    success, message = update_applicant_schedule(applicant_id, slot_id)
+    if not success:
+        return jsonify(success=False, error=message), 409
+    return jsonify(success=True, message=message)
 
 
 @app.route('/manager/applicants/<id>/decision', methods=['POST'])
@@ -636,15 +752,45 @@ def bureau_schedules():
         request.form.get('bureau_id') if request.method == 'POST'
         else request.args.get('bureau_id')) or 1
     con = get_db()
+    bureaus = get_bureaus()
     message = request.args.get('message', '')
     error = request.args.get('error', '')
+    new_start_at = request.form.get('start_at', '')
+    new_end_at = request.form.get('end_at', '')
 
     if request.method == 'POST':
-        schedule_id = parse_positive_int(request.form.get('schedule_id'))
-        if schedule_id is None:
-            error = '共通時間帯を選択してください。'
+        raw_schedule_id = request.form.get('schedule_id', '')
+        schedule_id = parse_positive_int(raw_schedule_id)
+        normalized_start_at = normalize_schedule_datetime(new_start_at)
+        normalized_end_at = normalize_schedule_datetime(new_end_at)
+        if raw_schedule_id and schedule_id is None:
+            error = '共通時間帯の指定が正しくありません。'
+        elif schedule_id is None and not new_start_at and not new_end_at:
+            error = '既存の時間帯を選ぶか、新しい開始・終了時刻を入力してください。'
+        elif schedule_id is None and (
+                normalized_start_at is None or normalized_end_at is None):
+            error = '開始・終了時刻の形式が正しくありません。'
+        elif schedule_id is None and normalized_start_at >= normalized_end_at:
+            error = '終了時刻は開始時刻より後にしてください。'
         else:
             try:
+                con.execute('BEGIN')
+                if schedule_id is None:
+                    con.execute(
+                        '''INSERT OR IGNORE INTO schedules (start_at, end_at)
+                           VALUES (?, ?)''',
+                        (normalized_start_at, normalized_end_at),
+                    )
+                    schedule = con.execute(
+                        '''SELECT id FROM schedules
+                           WHERE start_at = ? AND end_at = ?''',
+                        (normalized_start_at, normalized_end_at),
+                    ).fetchone()
+                    if schedule is None:
+                        raise sqlite3.IntegrityError(
+                            'schedule could not be created',
+                        )
+                    schedule_id = schedule['id']
                 con.execute(
                     '''INSERT INTO bureau_schedules (bureau_id, schedule_id)
                        VALUES (?, ?)''', (bureau_id, schedule_id),
@@ -668,12 +814,19 @@ def bureau_schedules():
     common_schedules = con.execute(
         '''SELECT id, start_at, end_at FROM schedules ORDER BY start_at'''
     ).fetchall()
+    selected_bureau = next(
+        (bureau for bureau in bureaus if bureau['id'] == bureau_id), None,
+    )
     return render_template(
         'bureau_schedules.html',
-        bureaus=get_bureaus(),
+        bureaus=bureaus,
+        selected_bureau=selected_bureau,
         selected_bureau_id=bureau_id,
         slots=get_slots_for_bureau(bureau_id),
+        board=get_assignment_board(bureau_id),
         common_schedules=common_schedules,
+        new_start_at=new_start_at,
+        new_end_at=new_end_at,
         message=message,
         error=error,
     )

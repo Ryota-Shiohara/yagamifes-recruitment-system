@@ -1,7 +1,15 @@
 {% extends "base.html" %}
 {% block title %}面接枠管理 | 新規局員採用システム{% endblock %}
 {% block content %}
-  <div class="page-heading"><div><p class="eyebrow">SCHEDULING</p><h1>局別面接枠</h1><p>局と共通時間帯の組で、一つの面接を表します。</p></div></div>
+  {% macro applicant_card(applicant) %}
+    <div class="assignment-card" draggable="{{ 'false' if applicant.has_scores else 'true' }}" data-applicant-id="{{ applicant.id }}" data-availability-ids="{{ applicant.availability_ids|join(',') }}">
+      <div class="assignment-card-main"><strong>{{ applicant.name }}</strong><small>{{ applicant.email }}</small></div>
+      <div class="assignment-card-meta"><span class="badge muted">希望枠 {{ applicant.availability_ids|length }}件</span>{% if applicant.has_scores %}<span class="badge warning">評価済み・変更不可</span>{% endif %}</div>
+      <a class="assignment-card-link" href="{{ url_for('applicant_detail', id=applicant.id) }}">詳細を見る</a>
+    </div>
+  {% endmacro %}
+
+  <div class="page-heading"><div><p class="eyebrow">SCHEDULING</p><h1>局別面接枠</h1><p>{% if selected_bureau %}{{ selected_bureau.name }}の{% endif %}面接枠を作成し、応募者を手動で割り当てます。</p></div></div>
   {% if message %}<p class="notice success">{{ message }}</p>{% endif %}{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
   <form class="toolbar panel" method="get">
     <div class="field compact"><label for="bureau_filter">表示する局</label><select id="bureau_filter" name="bureau_id">{% for bureau in bureaus %}<option value="{{ bureau.id }}" {% if bureau.id == selected_bureau_id %}selected{% endif %}>{{ bureau.name }}</option>{% endfor %}</select></div>
@@ -19,9 +27,35 @@
       <div><p class="eyebrow">INSERT</p><h2>面接枠を追加</h2><p class="help">同じ局で時間が重なる枠はDBトリガーが拒否します。</p></div>
       <form class="stack" method="post">
         <input type="hidden" name="bureau_id" value="{{ selected_bureau_id }}">
-        <div class="field"><label for="schedule_id">共通時間帯</label><select id="schedule_id" name="schedule_id" required><option value="">選択してください</option>{% for schedule in common_schedules %}<option value="{{ schedule.id }}">{{ schedule.start_at }}〜{{ schedule.end_at[11:] }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="schedule_id">既存の時間帯</label><select id="schedule_id" name="schedule_id"><option value="">新しい時刻を入力する</option>{% for schedule in common_schedules %}<option value="{{ schedule.id }}">{{ schedule.start_at }}〜{{ schedule.end_at[11:] }}</option>{% endfor %}</select><span class="help">既存の時間帯を使う場合だけ選択してください。</span></div>
+        <div class="form-grid compact-time-grid"><div class="field"><label for="start_at">開始</label><input id="start_at" name="start_at" type="datetime-local" value="{{ new_start_at }}"></div><div class="field"><label for="end_at">終了</label><input id="end_at" name="end_at" type="datetime-local" value="{{ new_end_at }}"></div></div>
         <button class="primary" type="submit">追加する</button>
       </form>
     </section>
   </div>
+
+  <section class="section-block panel assignment-board" data-assignment-board data-assignment-url="{{ url_for('manager_assignment') }}">
+    <div class="page-heading assignment-board-heading"><div><p class="eyebrow">DRAG &amp; DROP</p><h2>面接割り当てボード</h2><p>応募者カードを希望している面接枠へドラッグしてください。未割り当てへ戻すこともできます。</p></div><span class="badge">1枠につき1人</span></div>
+    <p class="notice" data-assignment-status aria-live="polite" hidden></p>
+    <div class="assignment-board-grid">
+      <section class="assignment-column">
+        <div class="assignment-column-heading"><h3>未割り当て</h3><span class="badge muted">{{ board.unassigned|length }}人</span></div>
+        <div class="assignment-drop-zone assignment-drop-zone--unassigned" data-slot-id="" data-occupied-applicant-id="">
+          {% for applicant in board.unassigned %}{{ applicant_card(applicant) }}{% else %}<p class="drop-hint">未割り当ての応募者はいません。</p>{% endfor %}
+        </div>
+      </section>
+      <section class="assignment-slots">
+        {% for slot in board.slots %}
+          <article class="assignment-slot">
+            <div class="assignment-slot-heading"><div><strong>{{ slot.start_at }}</strong><small>〜 {{ slot.end_at }}</small></div><span class="badge muted">希望 {{ slot.availability_count }}人</span></div>
+            <div class="assignment-drop-zone" data-slot-id="{{ slot.id }}" data-occupied-applicant-id="{{ slot.applicant.id if slot.applicant else '' }}">
+              {% if slot.applicant %}{{ applicant_card(slot.applicant) }}{% else %}<p class="drop-hint">ここにドロップ</p>{% endif %}
+            </div>
+          </article>
+        {% else %}<p class="empty">この局の面接枠はありません。上のフォームから作成してください。</p>{% endfor %}
+      </section>
+    </div>
+    <p class="help assignment-board-help">応募者が希望していない枠、予約済みの枠、評価入力済みで変更できない応募者への操作はサーバー側でも拒否します。</p>
+  </section>
+  <script defer src="{{ url_for('static', filename='assignment_board.js') }}"></script>
 {% endblock %}
