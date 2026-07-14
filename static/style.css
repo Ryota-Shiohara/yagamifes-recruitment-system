@@ -81,6 +81,16 @@ input, select, textarea { width: 100%; min-height: 44px; padding: 10px 12px; col
 textarea { min-height: 110px; resize: vertical; }
 input:focus, select:focus, textarea:focus { outline: 3px solid rgba(38,116,91,.18); border-color: var(--green-2); }
 .help, small { color: var(--muted); font-size: 13px; }
+.score-field { display: grid; gap: 8px; padding: 4px 0 20px; border: 0; border-bottom: 1px solid var(--line); }
+.score-field:last-of-type { border-bottom: 0; }
+.score-options { display: grid; grid-template-columns: repeat(10, minmax(36px, 1fr)); gap: 8px; max-width: 680px; }
+.score-option { position: relative; display: grid; place-items: center; cursor: pointer; }
+.score-option input { position: absolute; width: 1px; height: 1px; margin: -1px; opacity: 0; }
+.score-option span { display: grid; width: 100%; min-height: 46px; place-items: center; color: var(--green); background: #fff; border: 1px solid var(--line); border-radius: 10px; font-weight: 800; transition: color .15s, background .15s, border-color .15s, transform .15s; }
+.score-option:hover span { border-color: var(--green-2); background: var(--mint); transform: translateY(-1px); }
+.score-option input:checked + span { color: #fff; background: var(--green); border-color: var(--green); }
+.score-option input:focus-visible + span { outline: 3px solid rgba(38,116,91,.25); outline-offset: 2px; }
+.score-scale-hint { display: flex; justify-content: space-between; max-width: 680px; color: var(--muted); font-size: 12px; }
 .checkbox-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .checkbox-card { display: flex; gap: 10px; align-items: flex-start; padding: 13px; border: 1px solid var(--line); border-radius: 10px; font-weight: 400; }
 .checkbox-card input { width: auto; min-height: auto; margin-top: 5px; }
@@ -154,5 +164,6 @@ fieldset { min-width: 0; margin: 0; border: 0; padding: 0; }
   .hero, .card-grid.three, .card-grid.four, .detail-grid, .form-grid, .assignment-board-grid { grid-template-columns: 1fr; }
   .field.full { grid-column: auto; }
   .checkbox-list { grid-template-columns: 1fr; }
+  .score-options { grid-template-columns: repeat(5, 1fr); }
   .page-shell { width: min(100% - 24px, 1180px); padding-top: 34px; }
 }

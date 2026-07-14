@@ -85,6 +85,20 @@ class RecruitmentAppTestCase(unittest.TestCase):
         self.assertNotIn('応募者一覧', page_text(interviewer_home))
         self.assertEqual(self.client.get('/manager/rankings').status_code, 302)
 
+    def test_score_form_offers_clickable_scores_from_one_to_ten(self) -> None:
+        self.client.get('/role/interviewer')
+        response = self.client.get(
+            '/interviewer/interviewers/1/applicants/101/scores',
+        )
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertEqual(page.count('class="score-options"'), 2)
+        self.assertEqual(page.count('class="score-option"'), 20)
+        self.assertEqual(page.count('type="radio"'), 20)
+        self.assertIn('value="1"', page)
+        self.assertIn('value="10"', page)
+        self.assertNotIn('type="number"', page)
+
     def test_applicant_slot_loading_keeps_form_fields_on_bureau_change(self) -> None:
         self.client.get('/role/applicant')
 

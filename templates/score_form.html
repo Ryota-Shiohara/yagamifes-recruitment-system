@@ -5,13 +5,21 @@
   {% if errors %}<div class="notice error"><strong>すべての項目を確認してください。</strong><ul>{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul></div>{% endif %}
   <form class="panel stack" method="post">
     {% for criterion in criteria %}
-      <div class="field">
-        <label for="score_{{ criterion.id }}">{{ criterion.name }}</label>
+      <fieldset class="score-field">
+        <legend>{{ criterion.name }}</legend>
         <span class="help">{{ criterion.description }}</span>
-        <input id="score_{{ criterion.id }}" name="score_{{ criterion.id }}" type="number" min="1" max="10" step="1" required value="{{ entered_scores.get(criterion.id, '') }}">
-      </div>
+        <div class="score-options" role="radiogroup" aria-label="{{ criterion.name }}の評価">
+          {% for value in range(1, 11) %}
+            <label class="score-option">
+              <input type="radio" name="score_{{ criterion.id }}" value="{{ value }}" required {% if entered_scores.get(criterion.id) == value|string %}checked{% endif %}>
+              <span>{{ value }}</span>
+            </label>
+          {% endfor %}
+        </div>
+        <div class="score-scale-hint" aria-hidden="true"><span>低い</span><span>高い</span></div>
+      </fieldset>
     {% endfor %}
-    <p class="help">1〜10の整数で入力します。一項目でも不正な場合は全項目をロールバックします。</p>
+    <p class="help">各項目の1〜10をクリックして選択してください。一項目でも不正な場合は全項目をロールバックします。</p>
     <div class="button-row"><button class="primary" type="submit">全項目を保存</button><a class="button secondary" href="{{ url_for('interviewer_evaluations', id=context.interviewer_id) }}">戻る</a></div>
   </form>
 {% endblock %}
