@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}局責任者メニュー | 新規局員採用システム{% endblock %}
+{% block content %}
+  <section class="role-home">
+    <p class="eyebrow">BUREAU MANAGER</p>
+    <h1>局責任者メニュー</h1>
+    <p class="lead">応募者の選考に必要な管理画面を、このメニュー配下にまとめています。</p>
+    <div class="card-grid three">
+      <article class="feature-card"><span class="card-number">01</span><h2>応募者一覧</h2><p>応募者を検索し、詳細確認、面接割り当て、採否決定を行います。</p><a class="button primary" href="{{ url_for('applicants') }}">応募者管理へ</a></article>
+      <article class="feature-card"><span class="card-number">02</span><h2>面接枠</h2><p>局別の面接枠を追加、編集、削除します。</p><a class="button secondary" href="{{ url_for('bureau_schedules') }}">面接枠管理へ</a></article>
+      <article class="feature-card"><span class="card-number">03</span><h2>ランキング</h2><p>評価結果を確認し、採用候補を比較します。</p><a class="button secondary" href="{{ url_for('rankings') }}">ランキングへ</a></article>
+    </div>
+  </section>
+{% endblock %}

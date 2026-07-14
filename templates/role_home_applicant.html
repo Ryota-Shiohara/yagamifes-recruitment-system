@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}応募者メニュー | 新規局員採用システム{% endblock %}
+{% block content %}
+  <section class="role-home narrow">
+    <p class="eyebrow">APPLICANT</p>
+    <h1>応募者メニュー</h1>
+    <p class="lead">応募情報と、参加できる面接枠を登録します。</p>
+    {% if request.args.get('registered') == '1' %}<p class="notice success">応募情報を登録しました。</p>{% endif %}
+    <div class="feature-card">
+      <h2>応募情報を登録</h2>
+      <p>氏名、メールアドレス、希望局、複数の希望面接枠を入力できます。</p>
+      <a class="button primary" href="{{ url_for('applicant_new') }}">応募登録へ</a>
+    </div>
+  </section>
+{% endblock %}

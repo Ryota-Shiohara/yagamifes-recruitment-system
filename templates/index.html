@@ -1,32 +1,15 @@
 {% extends "base.html" %}
-{% block title %}入口 | 新規局員採用システム{% endblock %}
+{% block title %}役割を選択 | 新規局員採用システム{% endblock %}
 {% block content %}
-  <section class="hero">
-    <div>
-      <p class="eyebrow">DATABASE APPLICATION</p>
-      <h1>応募から採否までを、<br>一つのデータモデルで。</h1>
-      <p class="lead">応募者の希望面接枠、面接日程、評価、補正後ランキングをSQLiteで一貫して管理します。</p>
-      <div class="button-row">
-        <a class="button primary" href="{{ url_for('applicant_new') }}">応募情報を登録</a>
-        <a class="button secondary" href="{{ url_for('applicants') }}">選考状況を見る</a>
-      </div>
+  <section class="role-entry narrow">
+    <p class="eyebrow">START HERE</p>
+    <h1>利用する役割を選択</h1>
+    <p class="lead">選択した役割に必要な画面だけを表示します。</p>
+    <div class="card-grid three role-choice-grid">
+      <article class="feature-card"><span class="card-number">01</span><h2>応募者</h2><p>応募情報と希望面接枠を登録します。</p><a class="button primary" href="{{ url_for('select_role', role='applicant') }}">応募者として入る</a></article>
+      <article class="feature-card"><span class="card-number">02</span><h2>面接官</h2><p>担当局の応募者を評価します。</p><a class="button primary" href="{{ url_for('select_role', role='interviewer') }}">面接官として入る</a></article>
+      <article class="feature-card"><span class="card-number">03</span><h2>局責任者</h2><p>応募者、面接枠、採否を管理します。</p><a class="button primary" href="{{ url_for('select_role', role='bureau_manager') }}">局責任者として入る</a></article>
     </div>
-    <div class="hero-panel" aria-label="登録状況">
-      <div class="metric"><strong>{{ stats.applicant_count }}</strong><span>応募者</span></div>
-      <div class="metric"><strong>{{ stats.confirmed_count }}</strong><span>面接確定</span></div>
-      <div class="metric"><strong>{{ stats.score_count }}</strong><span>評価レコード</span></div>
-    </div>
-  </section>
-  <section class="section-block">
-    <div class="section-heading">
-      <p class="eyebrow">ROLE MENUS</p>
-      <h2>役割から操作を選ぶ</h2>
-      <p>この課題では認証を行わず、役割別に操作入口を分けています。</p>
-    </div>
-    <div class="card-grid three">
-      <article class="feature-card"><span class="card-number">01</span><h3>応募者</h3><p>希望局と複数の面接可能枠をまとめて登録します。</p><a href="{{ url_for('applicant_new') }}">応募登録へ →</a></article>
-      <article class="feature-card"><span class="card-number">02</span><h3>面接官</h3><p>同じ局の面接確定済み応募者を、評価項目ごとに採点します。</p><a href="{{ url_for('interviewers') }}">評価入力へ →</a></article>
-      <article class="feature-card"><span class="card-number">03</span><h3>局責任者</h3><p>面接割り当て、補正ランキング、採否決定を管理します。</p><a href="{{ url_for('applicants') }}">応募者管理へ →</a></article>
-    </div>
+    <p class="help">ログイン機能は未実装のデモです。役割を選び直すと入口へ戻ります。</p>
   </section>
 {% endblock %}

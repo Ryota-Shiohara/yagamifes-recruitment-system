@@ -12,12 +12,25 @@
         <span class="brand-mark">Y</span>
         <span>新規局員採用システム</span>
       </a>
+      {% if current_role %}
+        <div class="role-context">
+          <span class="badge">{{ role_labels[current_role] }}メニュー</span>
+          <a href="{{ url_for('index') }}">役割を選び直す</a>
+        </div>
+      {% endif %}
       <nav aria-label="主要メニュー">
-        <a href="{{ url_for('applicant_new') }}">応募登録</a>
-        <a href="{{ url_for('applicants') }}">応募者管理</a>
-        <a href="{{ url_for('bureau_schedules') }}">面接枠</a>
-        <a href="{{ url_for('interviewers') }}">評価入力</a>
-        <a href="{{ url_for('rankings') }}">ランキング</a>
+        {% if current_role == 'applicant' %}
+          <a href="{{ url_for('applicant_home') }}">応募者ホーム</a>
+          <a href="{{ url_for('applicant_new') }}">応募登録</a>
+        {% elif current_role == 'interviewer' %}
+          <a href="{{ url_for('interviewer_home') }}">面接官ホーム</a>
+          <a href="{{ url_for('interviewers') }}">面接官を選ぶ</a>
+        {% elif current_role == 'bureau_manager' %}
+          <a href="{{ url_for('bureau_manager_home') }}">局責任者ホーム</a>
+          <a href="{{ url_for('applicants') }}">応募者一覧</a>
+          <a href="{{ url_for('bureau_schedules') }}">面接枠</a>
+          <a href="{{ url_for('rankings') }}">ランキング</a>
+        {% endif %}
       </nav>
     </header>
     <main class="page-shell">{% block content %}{% endblock %}</main>

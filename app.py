@@ -2,10 +2,11 @@
 """矢上祭実行委員会の新規局員採用を題材にしたDB Webアプリ。"""
 
 import sqlite3
+from functools import wraps
 from typing import Final, Optional
 import unicodedata
 
-from flask import Flask, g, redirect, render_template, request, url_for
+from flask import Flask, g, redirect, render_template, request, session, url_for
 from werkzeug import Response
 
 
@@ -21,8 +22,63 @@ DECISION_LABELS: Final[dict[Optional[str], str]] = {
     'withdrawn': '辞退',
 }
 
+ROLE_LABELS: Final[dict[str, str]] = {
+    'applicant': '応募者',
+    'interviewer': '面接官',
+    'bureau_manager': '局責任者',
+}
+ROLE_HOME_ENDPOINTS: Final[dict[str, str]] = {
+    'applicant': 'applicant_home',
+    'interviewer': 'interviewer_home',
+    'bureau_manager': 'bureau_manager_home',
+}
+ROLE_PATH_PREFIXES: Final[dict[str, str]] = {
+    'applicant': '/applicant',
+    'interviewer': '/interviewer',
+    'bureau_manager': '/manager',
+}
+
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 64 * 1024
+# 認証用ではなく、入口で選択した画面区分をリクエスト間で保持するためだけに使う。
+app.config['SECRET_KEY'] = 'yagamifes-role-selection-demo'
+
+
+@app.context_processor
+def inject_role_context() -> dict[str, object]:
+    """テンプレートへ現在の画面区分を渡す。"""
+    active_role = session.get('active_role')
+    return {
+        'current_role': active_role if active_role in ROLE_LABELS else None,
+        'role_labels': ROLE_LABELS,
+    }
+
+
+def role_required(role: str):
+    """選択中の役割と異なる画面へ入らないようにする。
+
+    認証・認可ではなく、入口で選んだ画面導線を分離するためのガードである。
+    既存URLは移行互換のため、役割未選択時だけ引き続き利用できる。
+    """
+    def decorator(view):
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            active_role = session.get('active_role')
+            role_prefix = ROLE_PATH_PREFIXES[role]
+            is_role_path = (
+                request.path == role_prefix
+                or request.path.startswith(role_prefix + '/')
+            )
+            if active_role == role:
+                return view(*args, **kwargs)
+            if active_role is None and not is_role_path:
+                # 既存の未プレフィックスURLを、古いブックマークやテスト用に残す。
+                return view(*args, **kwargs)
+            if active_role in ROLE_HOME_ENDPOINTS:
+                return redirect(url_for(ROLE_HOME_ENDPOINTS[active_role]))
+            return redirect(url_for('index'))
+        return wrapped
+    return decorator
 
 
 def get_db() -> sqlite3.Connection:
@@ -180,20 +236,43 @@ def validate_applicant_form(
 
 @app.route('/')
 def index() -> str:
-    """入口ページを表示する。"""
-    stats = get_db().execute(
-        '''
-        SELECT
-            (SELECT COUNT(*) FROM applicants) AS applicant_count,
-            (SELECT COUNT(*) FROM applicants
-             WHERE confirmed_bureau_schedule_id IS NOT NULL)
-                AS confirmed_count,
-            (SELECT COUNT(*) FROM scores) AS score_count
-        ''').fetchone()
-    return render_template('index.html', stats=stats)
+    """役割を選択する入口ページを表示する。"""
+    session.pop('active_role', None)
+    return render_template('index.html')
 
 
-@app.route('/applicants/new', methods=['GET', 'POST'])
+@app.route('/role/<role>')
+def select_role(role: str):
+    """ログインなしで利用する画面区分を選択する。"""
+    if role not in ROLE_HOME_ENDPOINTS:
+        return render_error('役割の指定が正しくありません。', 404)
+    session['active_role'] = role
+    return redirect(url_for(ROLE_HOME_ENDPOINTS[role]))
+
+
+@app.route('/applicant')
+@role_required('applicant')
+def applicant_home() -> str:
+    """応募者向けの入口を表示する。"""
+    return render_template('role_home_applicant.html')
+
+
+@app.route('/interviewer')
+@role_required('interviewer')
+def interviewer_home() -> str:
+    """面接官向けの入口を表示する。"""
+    return render_template('role_home_interviewer.html')
+
+
+@app.route('/manager')
+@role_required('bureau_manager')
+def bureau_manager_home() -> str:
+    """局責任者向けの入口を表示する。"""
+    return render_template('role_home_manager.html')
+
+
+@app.route('/applicant/applications/new', methods=['GET', 'POST'])
+@role_required('applicant')
 def applicant_new():
     """応募者と複数の希望面接枠を一括登録する。"""
     bureaus = get_bureaus()
@@ -251,8 +330,7 @@ def applicant_new():
                 errors.append('データベースエラーのため登録できませんでした。')
             else:
                 return redirect(url_for(
-                    'applicant_detail', id=applicant_id,
-                    message='応募情報を登録しました。',
+                    'applicant_home', registered='1',
                 ))
 
     selected_bureau_id = parse_positive_int(form['bureau_id'])
@@ -271,7 +349,8 @@ def applicant_new():
     )
 
 
-@app.route('/applicants')
+@app.route('/manager/applicants')
+@role_required('bureau_manager')
 def applicants() -> str:
     """VIEWを利用して応募者一覧を検索する。"""
     bureau_id = parse_positive_int(request.args.get('bureau_id'))
@@ -314,7 +393,8 @@ def applicants() -> str:
     )
 
 
-@app.route('/applicants/<id>')
+@app.route('/manager/applicants/<id>')
+@role_required('bureau_manager')
 def applicant_detail(id: str):
     """応募者の希望枠、確定枠、評価進捗を表示する。"""
     applicant_id = parse_positive_int(id)
@@ -376,7 +456,8 @@ def applicant_detail(id: str):
     )
 
 
-@app.route('/applicants/<id>/edit', methods=['GET', 'POST'])
+@app.route('/manager/applicants/<id>/edit', methods=['GET', 'POST'])
+@role_required('bureau_manager')
 def applicant_edit(id: str):
     """応募者情報と希望枠をトランザクションで更新する。"""
     applicant_id = parse_positive_int(id)
@@ -464,7 +545,8 @@ def applicant_edit(id: str):
     )
 
 
-@app.route('/applicants/<id>/schedule', methods=['POST'])
+@app.route('/manager/applicants/<id>/schedule', methods=['POST'])
+@role_required('bureau_manager')
 def applicant_schedule(id: str) -> Response:
     """希望枠の一つを確定面接枠として割り当てる。"""
     applicant_id = parse_positive_int(id)
@@ -517,7 +599,8 @@ def applicant_schedule(id: str) -> Response:
     ))
 
 
-@app.route('/applicants/<id>/decision', methods=['POST'])
+@app.route('/manager/applicants/<id>/decision', methods=['POST'])
+@role_required('bureau_manager')
 def applicant_decision(id: str) -> Response:
     """局責任者による採否決定を保存する。"""
     applicant_id = parse_positive_int(id)
@@ -545,7 +628,8 @@ def applicant_decision(id: str) -> Response:
     ))
 
 
-@app.route('/bureau-schedules', methods=['GET', 'POST'])
+@app.route('/manager/bureau-schedules', methods=['GET', 'POST'])
+@role_required('bureau_manager')
 def bureau_schedules():
     """局別面接枠を一覧表示し、新規登録する。"""
     bureau_id = parse_positive_int(
@@ -595,7 +679,8 @@ def bureau_schedules():
     )
 
 
-@app.route('/bureau-schedules/<id>/edit', methods=['GET', 'POST'])
+@app.route('/manager/bureau-schedules/<id>/edit', methods=['GET', 'POST'])
+@role_required('bureau_manager')
 def bureau_schedule_edit(id: str):
     """未使用の局別面接枠が参照する共通時間帯を変更する。"""
     slot_id = parse_positive_int(id)
@@ -656,7 +741,8 @@ def bureau_schedule_edit(id: str):
     )
 
 
-@app.route('/bureau-schedules/<id>/delete', methods=['POST'])
+@app.route('/manager/bureau-schedules/<id>/delete', methods=['POST'])
+@role_required('bureau_manager')
 def bureau_schedule_delete(id: str) -> Response:
     """応募者から参照されていない局別面接枠を削除する。"""
     slot_id = parse_positive_int(id)
@@ -697,7 +783,8 @@ def bureau_schedule_delete(id: str) -> Response:
     ))
 
 
-@app.route('/interviewers')
+@app.route('/interviewer/interviewers')
+@role_required('interviewer')
 def interviewers() -> str:
     """面接官メニューを表示する。"""
     rows = get_db().execute(
@@ -716,7 +803,8 @@ def interviewers() -> str:
     return render_template('interviewers.html', interviewers=rows)
 
 
-@app.route('/interviewers/<id>/evaluations')
+@app.route('/interviewer/interviewers/<id>/evaluations')
+@role_required('interviewer')
 def interviewer_evaluations(id: str):
     """指定面接官と同じ局の面接確定済み応募者を表示する。"""
     interviewer_id = parse_positive_int(id)
@@ -758,9 +846,10 @@ def interviewer_evaluations(id: str):
 
 
 @app.route(
-    '/interviewers/<interviewer_id>/applicants/<applicant_id>/scores',
+    '/interviewer/interviewers/<interviewer_id>/applicants/<applicant_id>/scores',
     methods=['GET', 'POST'],
 )
+@role_required('interviewer')
 def score_edit(interviewer_id: str, applicant_id: str):
     """局の全評価項目を一つのトランザクションで保存する。"""
     parsed_interviewer_id = parse_positive_int(interviewer_id)
@@ -995,7 +1084,8 @@ def calculate_rankings(con: sqlite3.Connection, bureau_id: int):
     return bureau, complete_rows + incomplete_rows
 
 
-@app.route('/rankings')
+@app.route('/manager/rankings')
+@role_required('bureau_manager')
 def rankings() -> str:
     """局別の補正前平均と補正後ランキングを表示する。"""
     bureau_id = parse_positive_int(request.args.get('bureau_id')) or 1
@@ -1009,6 +1099,53 @@ def rankings() -> str:
         rows=rows,
         decision_labels=DECISION_LABELS,
         message=request.args.get('message', ''),
+    )
+
+
+# 未プレフィックスのURLは移行期間の互換用として残す。通常の画面遷移では
+# 役割プレフィックス付きURLだけを使うため、ナビゲーション上の混在は起きない。
+LEGACY_RULES: Final[tuple[tuple[str, str, object, list[str]], ...]] = (
+    ('/applicants/new', 'legacy_applicant_new', applicant_new, ['GET', 'POST']),
+    ('/applicants', 'legacy_applicants', applicants, ['GET']),
+    ('/applicants/<id>', 'legacy_applicant_detail', applicant_detail, ['GET']),
+    (
+        '/applicants/<id>/edit', 'legacy_applicant_edit', applicant_edit,
+        ['GET', 'POST'],
+    ),
+    (
+        '/applicants/<id>/schedule', 'legacy_applicant_schedule',
+        applicant_schedule, ['POST'],
+    ),
+    (
+        '/applicants/<id>/decision', 'legacy_applicant_decision',
+        applicant_decision, ['POST'],
+    ),
+    (
+        '/bureau-schedules', 'legacy_bureau_schedules', bureau_schedules,
+        ['GET', 'POST'],
+    ),
+    (
+        '/bureau-schedules/<id>/edit', 'legacy_bureau_schedule_edit',
+        bureau_schedule_edit, ['GET', 'POST'],
+    ),
+    (
+        '/bureau-schedules/<id>/delete', 'legacy_bureau_schedule_delete',
+        bureau_schedule_delete, ['POST'],
+    ),
+    ('/interviewers', 'legacy_interviewers', interviewers, ['GET']),
+    (
+        '/interviewers/<id>/evaluations', 'legacy_interviewer_evaluations',
+        interviewer_evaluations, ['GET'],
+    ),
+    (
+        '/interviewers/<interviewer_id>/applicants/<applicant_id>/scores',
+        'legacy_score_edit', score_edit, ['GET', 'POST'],
+    ),
+    ('/rankings', 'legacy_rankings', rankings, ['GET']),
+)
+for legacy_rule, endpoint, view, methods in LEGACY_RULES:
+    app.add_url_rule(
+        legacy_rule, endpoint=endpoint, view_func=view, methods=methods,
     )
 
 

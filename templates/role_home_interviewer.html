@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}面接官メニュー | 新規局員採用システム{% endblock %}
+{% block content %}
+  <section class="role-home narrow">
+    <p class="eyebrow">INTERVIEWER</p>
+    <h1>面接官メニュー</h1>
+    <p class="lead">面接官を選択すると、所属局の面接確定済み応募者だけを評価できます。</p>
+    <div class="feature-card">
+      <h2>担当する面接官を選択</h2>
+      <p>ログイン機能は未実装のため、デモ上で面接官を選択して進みます。</p>
+      <a class="button primary" href="{{ url_for('interviewers') }}">面接官を選ぶ</a>
+    </div>
+  </section>
+{% endblock %}

@@ -3,7 +3,6 @@
 {% block content %}
   <div class="page-heading">
     <div><p class="eyebrow">MANAGEMENT</p><h1>応募者一覧</h1><p>VIEWを利用し、局・氏名・日程・採否で検索します。</p></div>
-    <a class="button primary" href="{{ url_for('applicant_new') }}">新規応募</a>
   </div>
   <form class="toolbar panel" method="get">
     <div class="field compact"><label for="bureau_id">局</label><select id="bureau_id" name="bureau_id"><option value="">すべて</option>{% for bureau in bureaus %}<option value="{{ bureau.id }}" {% if selected_bureau_id == bureau.id %}selected{% endif %}>{{ bureau.name }}</option>{% endfor %}</select></div>

@@ -47,6 +47,44 @@ class RecruitmentAppTestCase(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 200)
 
+    def test_role_selection_separates_navigation_and_routes(self) -> None:
+        def page_text(response):
+            return response.get_data(as_text=True)
+
+        entry = self.client.get('/')
+        self.assertEqual(entry.status_code, 200)
+        self.assertIn('応募者として入る', page_text(entry))
+        self.assertNotIn('応募者一覧', page_text(entry))
+
+        applicant_home = self.client.get(
+            '/role/applicant', follow_redirects=True,
+        )
+        self.assertEqual(applicant_home.status_code, 200)
+        self.assertIn('応募者メニュー', page_text(applicant_home))
+        self.assertNotIn('応募者一覧', page_text(applicant_home))
+        self.assertEqual(self.client.get('/manager/applicants').status_code, 302)
+        self.assertEqual(self.client.get('/applicants').status_code, 302)
+
+        self.client.get('/')
+        manager_home = self.client.get(
+            '/role/bureau_manager', follow_redirects=True,
+        )
+        self.assertEqual(manager_home.status_code, 200)
+        self.assertIn('局責任者メニュー', page_text(manager_home))
+        self.assertIn('/manager/applicants', page_text(manager_home))
+        self.assertEqual(
+            self.client.get('/applicant/applications/new').status_code, 302,
+        )
+
+        self.client.get('/')
+        interviewer_home = self.client.get(
+            '/role/interviewer', follow_redirects=True,
+        )
+        self.assertEqual(interviewer_home.status_code, 200)
+        self.assertIn('面接官メニュー', page_text(interviewer_home))
+        self.assertNotIn('応募者一覧', page_text(interviewer_home))
+        self.assertEqual(self.client.get('/manager/rankings').status_code, 302)
+
     def test_applicant_and_availabilities_are_inserted_together(self) -> None:
         response = self.client.post('/applicants/new', data={
             'name': '新規 応募者',
