@@ -111,7 +111,7 @@ tbody tr:hover { background: #fbfcfa; }
 .badge.muted { color: var(--muted); background: #eceeeb; }
 .badge.warning { color: #7a5514; background: #f6e8c9; }
 .badge.danger { color: var(--danger); background: var(--danger-bg); }
-.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.detail-grid { display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 18px; }
 .compact-time-grid { gap: 12px; }
 .assignment-board { overflow: hidden; }
 .assignment-board-heading { align-items: center; margin-bottom: 20px; }
